@@ -8,10 +8,11 @@
   apt_key:
     url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
     state: present
+    
 
 - name: "Add kubernetes source list "
   apt_repository:
-    repo: "deb http://packages.cloud.google.com/apt/ kubernetes-xenial main"
+    repo: "deb https://apt.kubernetes.io/ kubernetes-xenial main"
     state: present
     filename: "kubernetes"
 

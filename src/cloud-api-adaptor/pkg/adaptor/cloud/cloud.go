@@ -5,6 +5,7 @@ package cloud
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,12 +20,11 @@ import (
 	"github.com/containerd/containerd/pkg/cri/annotations"
 	pb "github.com/kata-containers/kata-containers/src/runtime/protocols/hypervisor"
 
-	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/aa"
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/adaptor/k8sops"
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/adaptor/proxy"
-	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/cdh"
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/forwarder"
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/podnetwork"
+	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/userdata"
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/util"
 	provider "github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers"
 	putil "github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers/util"
@@ -267,24 +267,33 @@ func (s *cloudService) CreateVM(ctx context.Context, req *pb.CreateVMRequest) (r
 		},
 	}
 
-	if s.aaKBCParams != "" {
-		logger.Printf("aaKBCParams: %s, support cc_kbc::*", s.aaKBCParams)
-		toml, err := cdh.CreateConfigFile(s.aaKBCParams)
+	initdataStr := util.GetInitdataFromAnnotation(req.Annotations)
+	logger.Printf("initdata: %s", initdataStr)
+	if initdataStr != "" {
+		decodedBytes, err := base64.StdEncoding.DecodeString(initdataStr)
 		if err != nil {
-			return nil, fmt.Errorf("creating CDH config: %w", err)
+			return nil, fmt.Errorf("Error base64 decode initdata: %w", err)
+		}
+		initdata := userdata.InitData{}
+		err = json.Unmarshal(decodedBytes, &initdata)
+		if err != nil {
+			return nil, fmt.Errorf("Error unmarshalling initdata: %w", err)
+		}
+		for key, value := range initdata.Data {
+			cloudConfig.WriteFiles = append(cloudConfig.WriteFiles, cloudinit.WriteFile{
+				Path:    filepath.Join(userdata.ConfigParent, key),
+				Content: value,
+			})
+		}
+		cloned := initdata
+		cloned.Data = nil
+		clonedJSON, err := json.Marshal(cloned) // Data field omitted
+		if err != nil {
+			return nil, fmt.Errorf("Error Marshal cloned initdata: %w", err)
 		}
 		cloudConfig.WriteFiles = append(cloudConfig.WriteFiles, cloudinit.WriteFile{
-			Path:    cdh.ConfigFilePath,
-			Content: toml,
-		})
-
-		toml, err = aa.CreateConfigFile(s.aaKBCParams)
-		if err != nil {
-			return nil, fmt.Errorf("creating attestation agent config: %w", err)
-		}
-		cloudConfig.WriteFiles = append(cloudConfig.WriteFiles, cloudinit.WriteFile{
-			Path:    aa.DefaultAaConfigPath,
-			Content: toml,
+			Path:    userdata.AlgorithmPath,
+			Content: string(clonedJSON),
 		})
 	}
 

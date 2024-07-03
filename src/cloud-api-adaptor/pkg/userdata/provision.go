@@ -2,11 +2,15 @@ package userdata
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/avast/retry-go/v4"
@@ -17,23 +21,25 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+const (
+	AlgorithmPath  = "/run/peerpod/initdata.json"
+	AuthJsonPath   = "/run/peerpod/auth.json"
+	CheckSumPath   = "/run/peerpod/checksum.txt"
+	ConfigParent   = "/run/peerpod"
+	DaemonJsonName = "daemon.json"
+)
+
 var logger = log.New(log.Writer(), "[userdata/provision] ", log.LstdFlags|log.Lmsgprefix)
 
-type paths struct {
-	aaConfig     string
-	authJson     string
-	cdhConfig    string
-	daemonConfig string
-}
+var StaticFiles = []string{"/run/peerpod/aa.toml", "/run/peerpod/cdh.toml", "/run/peerpod/policy.rego"}
 
 type Config struct {
+	parentPath   string
 	fetchTimeout int
-	paths        paths
 }
 
-func NewConfig(aaConfigPath, authJsonPath, daemonConfigPath, cdhConfig string, fetchTimeout int) *Config {
-	cfgPaths := paths{aaConfigPath, authJsonPath, cdhConfig, daemonConfigPath}
-	return &Config{fetchTimeout, cfgPaths}
+func NewConfig(fetchTimeout int) *Config {
+	return &Config{ConfigParent, fetchTimeout}
 }
 
 type WriteFile struct {
@@ -43,6 +49,12 @@ type WriteFile struct {
 
 type CloudConfig struct {
 	WriteFiles []WriteFile `yaml:"write_files"`
+}
+
+type InitData struct {
+	Algorithom string            `json:"algorithm"`
+	Version    string            `json:"version"`
+	Data       map[string]string `json:"data,omitempty"`
 }
 
 type UserDataProvider interface {
@@ -150,16 +162,6 @@ func parseDaemonConfig(content []byte) (*daemon.Config, error) {
 	return &dc, nil
 }
 
-func findConfigEntry(path string, cc *CloudConfig) []byte {
-	for _, wf := range cc.WriteFiles {
-		if wf.Path != path {
-			continue
-		}
-		return []byte(wf.Content)
-	}
-	return nil
-}
-
 func writeFile(path string, bytes []byte) error {
 	// Ensure the parent directory exists
 	err := os.MkdirAll(filepath.Dir(path), 0755)
@@ -169,42 +171,87 @@ func writeFile(path string, bytes []byte) error {
 
 	err = os.WriteFile(path, bytes, 0644)
 	if err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
+		return fmt.Errorf("failed to write file %s: %w", path, err)
 	}
 	logger.Printf("Wrote %s\n", path)
 	return nil
 }
 
 func processCloudConfig(cfg *Config, cc *CloudConfig) error {
-	bytes := findConfigEntry(cfg.paths.daemonConfig, cc)
-	if bytes == nil {
-		return fmt.Errorf("failed to find daemon config entry in cloud config")
+	for _, wf := range cc.WriteFiles {
+		path := wf.Path
+		bytes := []byte(wf.Content)
+		if strings.HasPrefix(path, cfg.parentPath) { // handle files in "/run/peerpod"
+			if strings.HasSuffix(path, DaemonJsonName) { // handle daemon.json file
+				if bytes == nil {
+					return fmt.Errorf("failed to find daemon config entry in cloud config")
+				}
+				daemonConfig, err := parseDaemonConfig(bytes)
+				if err != nil {
+					return fmt.Errorf("failed to parse daemon config %s: %w", path, err)
+				}
+				if err = writeFile(path, bytes); err != nil {
+					return fmt.Errorf("failed to write daemon config file %s: %w", path, err)
+				}
+				if daemonConfig.AuthJson != "" { // handle auth json file
+					bytes := []byte(daemonConfig.AuthJson)
+					if err = writeFile(AuthJsonPath, bytes); err != nil {
+						return fmt.Errorf("failed to write auth json file %s: %w", AuthJsonPath, err)
+					}
+				}
+			} else { // handle other config files
+				if err := writeFile(path, bytes); err != nil {
+					return fmt.Errorf("failed to write config file %s: %w", path, err)
+				}
+			}
+		} else {
+			return fmt.Errorf("failed to write config file, path %s does not in folder %s", path, cfg.parentPath)
+		}
 	}
-	daemonConfig, err := parseDaemonConfig(bytes)
+	return nil
+}
+
+func calculateUserDataHash() error {
+	initJson, err := os.ReadFile(AlgorithmPath)
 	if err != nil {
-		return fmt.Errorf("failed to parse daemon config: %w", err)
+		return err
 	}
-	if err = writeFile(cfg.paths.daemonConfig, bytes); err != nil {
-		return fmt.Errorf("failed to write daemon config file: %w", err)
+	var initdata InitData
+	err = json.Unmarshal(initJson, &initdata)
+	if err != nil {
+		return err
 	}
 
-	if bytes := findConfigEntry(cfg.paths.aaConfig, cc); bytes != nil {
-		if err = writeFile(cfg.paths.aaConfig, bytes); err != nil {
-			return fmt.Errorf("failed to write aa config file: %w", err)
+	checksumStr := ""
+	var byteData []byte
+	for _, file := range StaticFiles {
+		if _, err := os.Stat(file); err == nil {
+			logger.Printf("calculateUserDataHash and reading file %s\n", file)
+			bytes, err := os.ReadFile(file)
+			if err != nil {
+				return fmt.Errorf("Error reading file %s: %v", file, err)
+			}
+			byteData = append(byteData, bytes...)
 		}
 	}
 
-	if bytes := findConfigEntry(cfg.paths.cdhConfig, cc); bytes != nil {
-		if err = writeFile(cfg.paths.cdhConfig, bytes); err != nil {
-			return fmt.Errorf("failed to write cdh config file: %w", err)
-		}
+	switch initdata.Algorithom {
+	case "sha256":
+		hash := sha256.Sum256(byteData)
+		checksumStr = hex.EncodeToString(hash[:])
+	case "sha384":
+		hash := sha512.Sum384(byteData)
+		checksumStr = hex.EncodeToString(hash[:])
+	case "sha512":
+		hash := sha512.Sum512(byteData)
+		checksumStr = hex.EncodeToString(hash[:])
+	default:
+		return fmt.Errorf("Error creating initdata hash, the algorothom %s not supported", initdata.Algorithom)
 	}
 
-	if daemonConfig.AuthJson != "" {
-		bytes := []byte(daemonConfig.AuthJson)
-		if err = writeFile(cfg.paths.authJson, bytes); err != nil {
-			return fmt.Errorf("failed to write auth json file: %w", err)
-		}
+	err = os.WriteFile(CheckSumPath, []byte(checksumStr), 0644) // the hash in CheckSumPath will also be used by attester
+	if err != nil {
+		return fmt.Errorf("failed to write file %s: %w", CheckSumPath, err)
 	}
 
 	return nil
@@ -216,18 +263,25 @@ func ProvisionFiles(cfg *Config) error {
 	ctx, cancel := context.WithTimeout(bg, duration)
 	defer cancel()
 
+	// some providers provision config files via process-user-data
+	// some providers rely on cloud-init provisin config files
+	// all providers need calculate the hash value for attesters usage
 	provider, err := newProvider(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to create UserData provider: %w", err)
+	if provider != nil {
+		cc, err := retrieveCloudConfig(ctx, provider)
+		if err != nil {
+			return fmt.Errorf("failed to retrieve cloud config: %w", err)
+		}
+
+		if err = processCloudConfig(cfg, cc); err != nil {
+			return fmt.Errorf("failed to process cloud config: %w", err)
+		}
+	} else {
+		logger.Printf("unsupported user data provider %s, we calculate initdata hash only.\n")
 	}
 
-	cc, err := retrieveCloudConfig(ctx, provider)
-	if err != nil {
-		return fmt.Errorf("failed to retrieve cloud config: %w", err)
-	}
-
-	if err = processCloudConfig(cfg, cc); err != nil {
-		return fmt.Errorf("failed to process cloud config: %w", err)
+	if err = calculateUserDataHash(); err != nil {
+		return fmt.Errorf("failed to calculate initdata hash: %w", err)
 	}
 
 	return nil

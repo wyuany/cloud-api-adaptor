@@ -29,8 +29,8 @@ import (
 	provider "github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers"
 	putil "github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers/util"
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers/util/cloudinit"
-
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/securecomms/wnssh"
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 const (
@@ -275,7 +275,7 @@ func (s *cloudService) CreateVM(ctx context.Context, req *pb.CreateVMRequest) (r
 			return nil, fmt.Errorf("Error base64 decode initdata: %w", err)
 		}
 		initdata := userdata.InitData{}
-		err = json.Unmarshal(decodedBytes, &initdata)
+		err = toml.Unmarshal(decodedBytes, &initdata)
 		if err != nil {
 			return nil, fmt.Errorf("Error unmarshalling initdata: %w", err)
 		}
@@ -287,13 +287,13 @@ func (s *cloudService) CreateVM(ctx context.Context, req *pb.CreateVMRequest) (r
 		}
 		cloned := initdata
 		cloned.Data = nil
-		clonedJSON, err := json.Marshal(cloned) // Data field omitted
+		clonedToml, err := toml.Marshal(cloned) // Data field omitted
 		if err != nil {
 			return nil, fmt.Errorf("Error Marshal cloned initdata: %w", err)
 		}
 		cloudConfig.WriteFiles = append(cloudConfig.WriteFiles, cloudinit.WriteFile{
-			Path:    userdata.AlgorithmPath,
-			Content: string(clonedJSON),
+			Path:    userdata.InitdataMeta,
+			Content: string(clonedToml),
 		})
 	}
 

@@ -18,11 +18,12 @@ import (
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers/aws"
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers/azure"
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers/docker"
+	toml "github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v2"
 )
 
 const (
-	AlgorithmPath  = "/run/peerpod/initdata.json"
+	InitdataMeta   = "/run/peerpod/initdata.meta"
 	AuthJsonPath   = "/run/peerpod/auth.json"
 	CheckSumPath   = "/run/peerpod/checksum.txt"
 	ConfigParent   = "/run/peerpod"
@@ -52,9 +53,9 @@ type CloudConfig struct {
 }
 
 type InitData struct {
-	Algorithom string            `json:"algorithm"`
-	Version    string            `json:"version"`
-	Data       map[string]string `json:"data,omitempty"`
+	Algorithom string            `toml:"algorithm"`
+	Version    string            `toml:"version"`
+	Data       map[string]string `toml:"data,omitempty"`
 }
 
 type UserDataProvider interface {
@@ -212,12 +213,12 @@ func processCloudConfig(cfg *Config, cc *CloudConfig) error {
 }
 
 func calculateUserDataHash() error {
-	initJson, err := os.ReadFile(AlgorithmPath)
+	initToml, err := os.ReadFile(InitdataMeta)
 	if err != nil {
 		return err
 	}
 	var initdata InitData
-	err = json.Unmarshal(initJson, &initdata)
+	err = toml.Unmarshal(initToml, &initdata)
 	if err != nil {
 		return err
 	}

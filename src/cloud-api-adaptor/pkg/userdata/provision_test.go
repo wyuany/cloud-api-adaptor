@@ -52,6 +52,51 @@ name = 'cc_kbc'
 url = 'http://1.2.3.4:8080'
 `
 
+var testInitdataMeta string = `algorithm = 'sha384'
+version = '0.1.0'
+`
+
+var testAAConfig string = `[token_configs]
+[token_configs.coco_as]
+url = 'http://127.0.0.1:8080'
+
+[token_configs.kbs]
+url = 'http://127.0.0.1:8080'
+`
+
+var testPolicyConfig string = `package agent_policy
+
+import future.keywords.in
+import future.keywords.every
+
+import input
+
+# Default values, returned by OPA when rules cannot be evaluated to true.
+default CopyFileRequest := false
+default CreateContainerRequest := false
+default CreateSandboxRequest := true
+default DestroySandboxRequest := true
+default ExecProcessRequest := false
+default GetOOMEventRequest := true
+default GuestDetailsRequest := true
+default OnlineCPUMemRequest := true
+default PullImageRequest := true
+default ReadStreamRequest := false
+default RemoveContainerRequest := true
+default RemoveStaleVirtiofsShareMountsRequest := true
+default SignalProcessRequest := true
+default StartContainerRequest := true
+default StatsContainerRequest := true
+default TtyWinResizeRequest := true
+default UpdateEphemeralMountsRequest := true
+default UpdateInterfaceRequest := true
+default UpdateRoutesRequest := true
+default WaitProcessRequest := true
+default WriteStreamRequest := false
+`
+
+var testCheckSum = "4c3d78dfa7f2e9da1b0b16b845f3520ee6ca0e76dc33dbb8944e609076932d56b4c6ad2deda0bffc7887959fabfdd71d"
+
 // Test server to simulate the metadata service
 func startTestServer() *httptest.Server {
 	// Create base64 encoded test data
@@ -235,7 +280,9 @@ func TestProcessCloudConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpDaemonConfigFile.Name())
+	newTmpDaemonConfigFile := tmpDaemonConfigFile.Name() + "-" + DaemonJsonName
+	_ = os.Rename(tmpDaemonConfigFile.Name(), newTmpDaemonConfigFile)
+	defer os.Remove(newTmpDaemonConfigFile)
 
 	// create temporary auth json file
 	tmpAuthJsonFile, err := os.CreateTemp("", "test")
@@ -260,7 +307,7 @@ write_files:
   content: |
 %s
 `,
-		tmpDaemonConfigFile.Name(),
+		newTmpDaemonConfigFile,
 		indentTextBlock(testDaemonConfig, 4),
 		tmpCDHConfigFile.Name(),
 		indentTextBlock(testCDHConfig, 4))
@@ -273,18 +320,19 @@ write_files:
 	}
 
 	cfg := Config{
-		paths: paths{
-			daemonConfig: tmpDaemonConfigFile.Name(),
-			cdhConfig:    tmpCDHConfigFile.Name(),
-			authJson:     tmpAuthJsonFile.Name(),
-		},
+		ConfigParent,
+		"",
+		tmpAuthJsonFile.Name(),
+		"",
+		StaticFiles,
+		180,
 	}
 	if err := processCloudConfig(&cfg, cc); err != nil {
 		t.Fatalf("failed to process cloud config file: %v", err)
 	}
 
 	// check if files have been written correctly
-	data, _ := os.ReadFile(tmpDaemonConfigFile.Name())
+	data, _ := os.ReadFile(newTmpDaemonConfigFile)
 	fileContent := string(data)
 	if fileContent != testDaemonConfig {
 		t.Fatalf("file content does not match daemon config fixture: got %q", fileContent)
@@ -305,7 +353,9 @@ write_files:
 
 func TestProcessWithoutCDHConfig(t *testing.T) {
 	tmpDaemonConfigFile, _ := os.CreateTemp("", "test")
-	defer os.Remove(tmpDaemonConfigFile.Name())
+	newTmpDaemonConfigFile := tmpDaemonConfigFile.Name() + "-" + DaemonJsonName
+	_ = os.Rename(tmpDaemonConfigFile.Name(), newTmpDaemonConfigFile)
+	defer os.Remove(newTmpDaemonConfigFile)
 	tmpAuthJsonFile, _ := os.CreateTemp("", "test")
 	defer os.Remove(tmpAuthJsonFile.Name())
 	tmpCDHConfigFile, _ := os.CreateTemp("", "test")
@@ -317,7 +367,7 @@ write_files:
   content: |
 %s
 `,
-		tmpDaemonConfigFile.Name(),
+		newTmpDaemonConfigFile,
 		indentTextBlock(testDaemonConfig, 4))
 	provider := TestProvider{content: content}
 
@@ -327,11 +377,12 @@ write_files:
 	}
 
 	cfg := Config{
-		paths: paths{
-			daemonConfig: tmpDaemonConfigFile.Name(),
-			cdhConfig:    tmpCDHConfigFile.Name(),
-			authJson:     tmpAuthJsonFile.Name(),
-		},
+		ConfigParent,
+		"",
+		tmpAuthJsonFile.Name(),
+		"",
+		StaticFiles,
+		180,
 	}
 	if err := processCloudConfig(&cfg, cc); err != nil {
 		t.Fatalf("failed to process cloud config file: %v", err)
@@ -374,5 +425,44 @@ func TestParseDaemonConfig(t *testing.T) {
 
 	if config.PodName != "nginx-866fdb5bfb-b98nw" {
 		t.Fatalf("config.PodName does not match test data: expected %q, got %q", "nginx-866fdb5bfb-b98nw", config.PodName)
+	}
+}
+
+func TestCalculateUserDataHash(t *testing.T) {
+	tmpInitdataMeta, _ := os.CreateTemp("", "test")
+	defer os.Remove(tmpInitdataMeta.Name())
+	tmpAA, _ := os.CreateTemp("", "test")
+	defer os.Remove(tmpAA.Name())
+	tmpCDH, _ := os.CreateTemp("", "test")
+	defer os.Remove(tmpCDH.Name())
+	tmpPolicy, _ := os.CreateTemp("", "test")
+	defer os.Remove(tmpPolicy.Name())
+	tmpCheckSum, _ := os.CreateTemp("", "test")
+	defer os.Remove(tmpCheckSum.Name())
+
+	var staticFiles = []string{tmpAA.Name(), tmpCDH.Name(), tmpPolicy.Name()}
+	_ = writeFile(tmpInitdataMeta.Name(), []byte(testInitdataMeta))
+	_ = writeFile(tmpAA.Name(), []byte(testAAConfig))
+	_ = writeFile(tmpCDH.Name(), []byte(testCDHConfig))
+	_ = writeFile(tmpPolicy.Name(), []byte(testPolicyConfig))
+
+	cfg := Config{
+		ConfigParent,
+		tmpInitdataMeta.Name(),
+		"",
+		tmpCheckSum.Name(),
+		staticFiles,
+		180,
+	}
+
+	err := calculateUserDataHash(&cfg)
+	if err != nil {
+		t.Fatalf("calculateUserDataHash returned err: %v", err)
+	}
+
+	bytes, _ := os.ReadFile(tmpCheckSum.Name())
+	sum := string(bytes)
+	if testCheckSum != sum {
+		t.Fatalf("calculateUserDataHash returned: %s does not match %s", sum, testCheckSum)
 	}
 }

@@ -24,12 +24,12 @@ import (
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/adaptor/proxy"
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/forwarder"
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/podnetwork"
+	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/securecomms/wnssh"
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/userdata"
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/util"
 	provider "github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers"
 	putil "github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers/util"
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers/util/cloudinit"
-	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/pkg/securecomms/wnssh"
 	toml "github.com/pelletier/go-toml/v2"
 )
 

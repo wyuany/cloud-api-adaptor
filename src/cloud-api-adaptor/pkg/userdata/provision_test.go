@@ -15,6 +15,10 @@ import (
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers/azure"
 )
 
+var testAgentConfig string = `server_addr = 'unix:///run/kata-containers/agent.sock'
+guest_components_procs = 'none'
+`
+
 var testDaemonConfig string = `{
 	"pod-network": {
 		"podip": "10.244.0.19/24",
@@ -39,8 +43,12 @@ var testDaemonConfig string = `{
 	"pod-name": "nginx-866fdb5bfb-b98nw",
 	"tls-server-key": "-----BEGIN PRIVATE KEY-----\n....\n-----END PRIVATE KEY-----\n",
 	"tls-server-cert": "-----BEGIN CERTIFICATE-----\n....\n-----END CERTIFICATE-----\n",
-	"tls-client-ca": "-----BEGIN CERTIFICATE-----\n....\n-----END CERTIFICATE-----\n",
-	"auth-json": "{\"auths\":{}}"
+	"tls-client-ca": "-----BEGIN CERTIFICATE-----\n....\n-----END CERTIFICATE-----\n"
+}
+`
+
+var testAuthJson string = `{
+	"auths":{}
 }
 `
 
@@ -275,6 +283,13 @@ func indentTextBlock(text string, by int) string {
 
 // TestProcessCloudConfig tests parsing and provisioning of a daemon config
 func TestProcessCloudConfig(t *testing.T) {
+	// create temporary agent config file
+	tmpAgentConfigFile, err := os.CreateTemp("", "test")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpAgentConfigFile.Name())
+
 	// create temporary daemon config file
 	tmpDaemonConfigFile, err := os.CreateTemp("", "test")
 	if err != nil {
@@ -306,11 +321,21 @@ write_files:
 - path: %s
   content: |
 %s
+- path: %s
+  content: |
+%s
+- path: %s
+  content: |
+%s
 `,
-		newTmpDaemonConfigFile,
+		tmpAgentConfigFile.Name(),
+		indentTextBlock(testAgentConfig, 4),
+		tmpDaemonConfigFile.Name(),
 		indentTextBlock(testDaemonConfig, 4),
 		tmpCDHConfigFile.Name(),
-		indentTextBlock(testCDHConfig, 4))
+		indentTextBlock(testCDHConfig, 4),
+		tmpAuthJsonFile.Name(),
+		indentTextBlock(testAuthJson, 4))
 
 	provider := TestProvider{content: content}
 
@@ -320,20 +345,25 @@ write_files:
 	}
 
 	cfg := Config{
-		ConfigParent,
-		"",
-		tmpAuthJsonFile.Name(),
-		"",
-		StaticFiles,
-		180,
+		paths: paths{
+			daemonConfig: tmpDaemonConfigFile.Name(),
+			cdhConfig:    tmpCDHConfigFile.Name(),
+			authJson:     tmpAuthJsonFile.Name(),
+		},
 	}
 	if err := processCloudConfig(&cfg, cc); err != nil {
 		t.Fatalf("failed to process cloud config file: %v", err)
 	}
 
 	// check if files have been written correctly
-	data, _ := os.ReadFile(newTmpDaemonConfigFile)
+	data, _ := os.ReadFile(tmpDaemonConfigFile.Name())
 	fileContent := string(data)
+	if fileContent != testAgentConfig {
+		t.Fatalf("file content does not match daemon config fixture: got %q", fileContent)
+	}
+
+	data, _ = os.ReadFile(tmpDaemonConfigFile.Name())
+	fileContent = string(data)
 	if fileContent != testDaemonConfig {
 		t.Fatalf("file content does not match daemon config fixture: got %q", fileContent)
 	}
@@ -346,12 +376,14 @@ write_files:
 
 	data, _ = os.ReadFile(tmpAuthJsonFile.Name())
 	fileContent = string(data)
-	if fileContent != `{"auths":{}}` {
+	if fileContent != testAuthJson {
 		t.Fatalf("file content does not match auth json fixture: got %q", fileContent)
 	}
 }
 
-func TestProcessWithoutCDHConfig(t *testing.T) {
+func TestProcessWithOptionalEntries(t *testing.T) {
+	tmpAgentConfigFile, _ := os.CreateTemp("", "test")
+	defer os.Remove(tmpAgentConfigFile.Name())
 	tmpDaemonConfigFile, _ := os.CreateTemp("", "test")
 	newTmpDaemonConfigFile := tmpDaemonConfigFile.Name() + "-" + DaemonJsonName
 	_ = os.Rename(tmpDaemonConfigFile.Name(), newTmpDaemonConfigFile)
@@ -359,15 +391,18 @@ func TestProcessWithoutCDHConfig(t *testing.T) {
 	tmpAuthJsonFile, _ := os.CreateTemp("", "test")
 	defer os.Remove(tmpAuthJsonFile.Name())
 	tmpCDHConfigFile, _ := os.CreateTemp("", "test")
-	defer os.Remove(tmpCDHConfigFile.Name())
+	os.Remove(tmpCDHConfigFile.Name())
 
 	content := fmt.Sprintf(`#cloud-config
 write_files:
 - path: %s
   content: |
 %s
+- path: %s
+  content: |
+%s
 `,
-		newTmpDaemonConfigFile,
+		tmpDaemonConfigFile.Name(),
 		indentTextBlock(testDaemonConfig, 4))
 	provider := TestProvider{content: content}
 
@@ -377,15 +412,19 @@ write_files:
 	}
 
 	cfg := Config{
-		ConfigParent,
-		"",
-		tmpAuthJsonFile.Name(),
-		"",
-		StaticFiles,
-		180,
+		paths: paths{
+			daemonConfig: tmpDaemonConfigFile.Name(),
+			cdhConfig:    tmpCDHConfigFile.Name(),
+			authJson:     tmpAuthJsonFile.Name(),
+		},
 	}
 	if err := processCloudConfig(&cfg, cc); err != nil {
 		t.Fatalf("failed to process cloud config file: %v", err)
+	}
+
+	_, err = os.Stat(tmpCDHConfigFile.Name())
+	if !os.IsNotExist(err) {
+		t.Fatalf("CDH config file shouldn't exist")
 	}
 }
 
@@ -425,44 +464,5 @@ func TestParseDaemonConfig(t *testing.T) {
 
 	if config.PodName != "nginx-866fdb5bfb-b98nw" {
 		t.Fatalf("config.PodName does not match test data: expected %q, got %q", "nginx-866fdb5bfb-b98nw", config.PodName)
-	}
-}
-
-func TestCalculateUserDataHash(t *testing.T) {
-	tmpInitdataMeta, _ := os.CreateTemp("", "test")
-	defer os.Remove(tmpInitdataMeta.Name())
-	tmpAA, _ := os.CreateTemp("", "test")
-	defer os.Remove(tmpAA.Name())
-	tmpCDH, _ := os.CreateTemp("", "test")
-	defer os.Remove(tmpCDH.Name())
-	tmpPolicy, _ := os.CreateTemp("", "test")
-	defer os.Remove(tmpPolicy.Name())
-	tmpCheckSum, _ := os.CreateTemp("", "test")
-	defer os.Remove(tmpCheckSum.Name())
-
-	var staticFiles = []string{tmpAA.Name(), tmpCDH.Name(), tmpPolicy.Name()}
-	_ = writeFile(tmpInitdataMeta.Name(), []byte(testInitdataMeta))
-	_ = writeFile(tmpAA.Name(), []byte(testAAConfig))
-	_ = writeFile(tmpCDH.Name(), []byte(testCDHConfig))
-	_ = writeFile(tmpPolicy.Name(), []byte(testPolicyConfig))
-
-	cfg := Config{
-		ConfigParent,
-		tmpInitdataMeta.Name(),
-		"",
-		tmpCheckSum.Name(),
-		staticFiles,
-		180,
-	}
-
-	err := calculateUserDataHash(&cfg)
-	if err != nil {
-		t.Fatalf("calculateUserDataHash returned err: %v", err)
-	}
-
-	bytes, _ := os.ReadFile(tmpCheckSum.Name())
-	sum := string(bytes)
-	if testCheckSum != sum {
-		t.Fatalf("calculateUserDataHash returned: %s does not match %s", sum, testCheckSum)
 	}
 }

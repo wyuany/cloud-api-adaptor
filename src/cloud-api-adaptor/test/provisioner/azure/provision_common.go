@@ -174,13 +174,12 @@ func (p *AzureCloudProvisioner) DeleteVPC(ctx context.Context, cfg *envconf.Conf
 func createFederatedIdentityCredential(aksOIDCIssuer string) error {
 	namespace := "confidential-containers-system"
 	serviceAccountName := "cloud-api-adaptor"
-	log.Infof("Successfully created federated identity credential %q in resource group %q", AzureProps.federatedIdentityCredentialName, AzureProps.ResourceGroupName)
 
 	if _, err := AzureProps.FederatedIdentityCredentialsClient.CreateOrUpdate(
 		context.Background(),
 		AzureProps.ResourceGroupName,
 		AzureProps.ManagedIdentityName,
-		AzureProps.federatedIdentityCredentialName,
+		AzureProps.FederatedCredentialName,
 		armmsi.FederatedIdentityCredential{
 			Properties: &armmsi.FederatedIdentityCredentialProperties{
 				Audiences: []*string{to.Ptr("api://AzureADTokenExchange")},
@@ -193,7 +192,7 @@ func createFederatedIdentityCredential(aksOIDCIssuer string) error {
 		return fmt.Errorf("creating federated identity credential: %w", err)
 	}
 
-	log.Infof("Successfully created federated identity credential %q in resource group %q", AzureProps.federatedIdentityCredentialName, AzureProps.ResourceGroupName)
+	log.Infof("Successfully created federated identity credential %q in resource group %q", AzureProps.FederatedCredentialName, AzureProps.ResourceGroupName)
 
 	return nil
 }
@@ -203,13 +202,13 @@ func deleteFederatedIdentityCredential() error {
 		context.Background(),
 		AzureProps.ResourceGroupName,
 		AzureProps.ManagedIdentityName,
-		AzureProps.federatedIdentityCredentialName,
+		AzureProps.FederatedCredentialName,
 		nil,
 	); err != nil {
 		return fmt.Errorf("deleting federated identity credential: %w", err)
 	}
 
-	log.Infof("Successfully deleted federated identity credential %q in resource group %q", AzureProps.federatedIdentityCredentialName, AzureProps.ResourceGroupName)
+	log.Infof("Successfully deleted federated identity credential %q in resource group %q", AzureProps.FederatedCredentialName, AzureProps.ResourceGroupName)
 
 	return nil
 }
@@ -362,6 +361,8 @@ func getPropertiesImpl() map[string]string {
 		"AZURE_INSTANCE_SIZE":   AzureProps.InstanceSize,
 		"KBS_IMAGE":             AzureProps.KbsImage,
 		"KBS_IMAGE_TAG":         AzureProps.KbsImageTag,
+		"TAGS":                  AzureProps.Tags,
+		"CONTAINER_RUNTIME":     AzureProps.ContainerRuntime,
 	}
 
 	return props
@@ -380,7 +381,7 @@ func (p *AzureCloudProvisioner) UploadPodvm(imagePath string, ctx context.Contex
 
 func isAzureKustomizeConfigMapKey(key string) bool {
 	switch key {
-	case "CLOUD_PROVIDER", "AZURE_SUBSCRIPTION_ID", "AZURE_REGION", "AZURE_INSTANCE_SIZE", "AZURE_RESOURCE_GROUP", "AZURE_SUBNET_ID", "AZURE_IMAGE_ID", "SSH_USERNAME", "AA_KBC_PARAMS":
+	case "CLOUD_PROVIDER", "AZURE_SUBSCRIPTION_ID", "AZURE_REGION", "AZURE_INSTANCE_SIZE", "AZURE_RESOURCE_GROUP", "AZURE_SUBNET_ID", "AZURE_IMAGE_ID", "SSH_USERNAME", "AA_KBC_PARAMS", "TAGS":
 		return true
 	default:
 		return false

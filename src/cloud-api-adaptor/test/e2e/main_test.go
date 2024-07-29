@@ -24,6 +24,10 @@ var (
 	keyBrokerService *pv.KeyBrokerService
 )
 
+const (
+	defaultContainerRuntime = "containerd"
+)
+
 func init() {
 	initLogger()
 }
@@ -96,7 +100,11 @@ func TestMain(m *testing.M) {
 	}
 
 	// The DEPLOY_KBS is exported then provisioner will install kbs before installing CAA
-	shouldDeployKbs := isTestWithKbs()
+	shouldDeployKbs := false
+	if os.Getenv("DEPLOY_KBS") == "true" || os.Getenv("DEPLOY_KBS") == "yes" {
+		shouldDeployKbs = true
+		os.Setenv("TEST_KBS", "true")
+	}
 
 	if !shouldProvisionCluster {
 		// Look for a suitable kubeconfig file in the sequence: --kubeconfig flag,
@@ -123,6 +131,16 @@ func TestMain(m *testing.M) {
 			}
 		}
 
+		// Set CONTAINER_RUNTIME env variable if present in the properties
+		// Default value is containerd.
+		containerRuntime := defaultContainerRuntime
+		if props["CONTAINER_RUNTIME"] != "" {
+			containerRuntime = props["CONTAINER_RUNTIME"]
+		}
+
+		log.Infof("Container runtime: %s", containerRuntime)
+		os.Setenv("CONTAINER_RUNTIME", containerRuntime)
+
 		if shouldProvisionCluster {
 			log.Info("Cluster provisioning")
 			if err = provisioner.CreateVPC(ctx, cfg); err != nil {
@@ -137,7 +155,7 @@ func TestMain(m *testing.M) {
 		var kbsparams string
 		if shouldDeployKbs {
 			log.Info("Deploying kbs")
-			if keyBrokerService, err = pv.NewKeyBrokerService(props["CLUSTER_NAME"]); err != nil {
+			if keyBrokerService, err = pv.NewKeyBrokerService(props["CLUSTER_NAME"], cfg); err != nil {
 				return ctx, err
 			}
 

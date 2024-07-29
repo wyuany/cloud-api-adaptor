@@ -20,7 +20,7 @@ require (
 	github.com/coreos/go-iptables v0.6.0
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/uuid v1.6.0
-	github.com/kata-containers/kata-containers/src/runtime v0.0.0-20240617195946-7df221a8f968
+	github.com/kata-containers/kata-containers/src/runtime v0.0.0-20240717205640-6aff5f300a98
 	github.com/opencontainers/runtime-spec v1.1.1-0.20230922153023-c0e90434df2a
 	github.com/stretchr/testify v1.9.0
 	github.com/vishvananda/netlink v1.2.1-beta.2
@@ -47,9 +47,10 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/eks v1.29.5
 	github.com/aws/aws-sdk-go-v2/service/iam v1.22.5
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.38.5
-	github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers v0.9.0-alpha1-alpha.1
-	github.com/confidential-containers/cloud-api-adaptor/src/peerpod-ctrl v0.9.0-alpha1-alpha.1
+	github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers v0.9.0-alpha.3
+	github.com/confidential-containers/cloud-api-adaptor/src/peerpod-ctrl v0.9.0-alpha.3
 	github.com/coreos/go-systemd v0.0.0-20190719114852-fd7a80b32e1f
+	github.com/docker/docker v25.0.5+incompatible
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/moby/sys/mountinfo v0.7.1
 	github.com/pelletier/go-toml/v2 v2.1.0
@@ -102,7 +103,6 @@ require (
 	github.com/containerd/typeurl/v2 v2.1.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/docker/docker v25.0.5+incompatible // indirect
 	github.com/docker/go-connections v0.5.0 // indirect
 	github.com/docker/go-events v0.0.0-20190806004212-e31b211e4f1c // indirect
 	github.com/docker/go-units v0.5.0 // indirect
@@ -145,7 +145,7 @@ require (
 	github.com/kdomanski/iso9660 v0.4.0 // indirect
 	github.com/klauspost/compress v1.17.3 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
-	github.com/leodido/go-urn v1.2.3 // indirect
+	github.com/leodido/go-urn v1.2.4 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/moby/locker v1.0.1 // indirect

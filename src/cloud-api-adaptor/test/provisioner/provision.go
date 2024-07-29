@@ -5,10 +5,6 @@ package provisioner
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +12,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor/test/utils"
 	log "github.com/sirupsen/logrus"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -51,6 +48,8 @@ var NewProvisionerFunctions = make(map[string]NewProvisionerFunc)
 type CloudAPIAdaptor struct {
 	caaDaemonSet         *appsv1.DaemonSet    // Represents the cloud-api-adaptor daemonset
 	ccDaemonSet          *appsv1.DaemonSet    // Represents the CoCo installer daemonset
+	ccOpGitRepo          string               // CoCo operator's repository URL
+	ccOpGitRef           string               // CoCo operator's repository reference
 	cloudProvider        string               // Cloud provider
 	controllerDeployment *appsv1.Deployment   // Represents the controller manager deployment
 	namespace            string               // The CoCo namespace
@@ -81,120 +80,6 @@ type InstallOverlay interface {
 // Waiting timeout for bringing up the pod
 const PodWaitTimeout = time.Second * 30
 
-// trustee repo related base path
-const TRUSTEE_REPO_PATH = "../trustee"
-
-func saveToFile(filename string, content []byte) error {
-	// Save contents to file
-	err := os.WriteFile(filename, content, 0644)
-	if err != nil {
-		return fmt.Errorf("writing contents to file: %w", err)
-	}
-	return nil
-}
-
-func NewKeyBrokerService(clusterName string) (*KeyBrokerService, error) {
-	log.Info("creating key.bin")
-
-	// Create secret
-	content := []byte("This is my cluster name: " + clusterName)
-	filePath := filepath.Join(TRUSTEE_REPO_PATH, "/kbs/config/kubernetes/overlays/key.bin")
-	// Create the file.
-	file, err := os.Create(filePath)
-	if err != nil {
-		err = fmt.Errorf("creating file: %w\n", err)
-		log.Errorf("%v", err)
-		return nil, err
-	}
-	defer file.Close()
-
-	// Write the content to the file.
-	err = saveToFile(filePath, content)
-	if err != nil {
-		err = fmt.Errorf("writing to the file: %w\n", err)
-		log.Errorf("%v", err)
-		return nil, err
-	}
-
-	k8sCnfDir, err := os.Getwd()
-	if err != nil {
-		err = fmt.Errorf("getting the current working directory: %w\n", err)
-		log.Errorf("%v", err)
-		return nil, err
-	}
-	fmt.Println(k8sCnfDir)
-
-	kbsCert := filepath.Join(k8sCnfDir, TRUSTEE_REPO_PATH, "kbs/config/kubernetes/base/kbs.pem")
-	if _, err := os.Stat(kbsCert); os.IsNotExist(err) {
-		kbsKey := filepath.Join(k8sCnfDir, TRUSTEE_REPO_PATH, "kbs/config/kubernetes/base/kbs.key")
-		keyOutputFile, err := os.Create(kbsKey)
-		if err != nil {
-			err = fmt.Errorf("creating key file: %w\n", err)
-			log.Errorf("%v", err)
-			return nil, err
-		}
-		defer keyOutputFile.Close()
-
-		pubKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
-		if err != nil {
-			err = fmt.Errorf("generating Ed25519 key pair: %w\n", err)
-			log.Errorf("%v", err)
-			return nil, err
-		}
-
-		b, err := x509.MarshalPKCS8PrivateKey(privateKey)
-		if err != nil {
-			err = fmt.Errorf("MarshalPKCS8PrivateKey private key: %w\n", err)
-			log.Errorf("%v", err)
-			return nil, err
-		}
-
-		privateKeyPEM := pem.EncodeToMemory(&pem.Block{
-			Type:  "PRIVATE KEY",
-			Bytes: b,
-		})
-
-		// Save private key to file
-		err = saveToFile(kbsKey, privateKeyPEM)
-		if err != nil {
-			err = fmt.Errorf("saving private key to file: %w\n", err)
-			log.Errorf("%v", err)
-			return nil, err
-		}
-
-		b, err = x509.MarshalPKIXPublicKey(pubKey)
-		if err != nil {
-			err = fmt.Errorf("MarshalPKIXPublicKey Ed25519 public key: %w\n", err)
-			log.Errorf("%v", err)
-			return nil, err
-		}
-
-		publicKeyPEM := pem.EncodeToMemory(&pem.Block{
-			Type:  "PUBLIC KEY",
-			Bytes: b,
-		})
-
-		// Save public key to file
-		err = saveToFile(kbsCert, publicKeyPEM)
-		if err != nil {
-			err = fmt.Errorf("saving public key to file: %w\n", err)
-			log.Errorf("%v", err)
-			return nil, err
-		}
-
-	}
-
-	overlay, err := NewBaseKbsInstallOverlay(TRUSTEE_REPO_PATH)
-	if err != nil {
-		return nil, err
-	}
-
-	return &KeyBrokerService{
-		installOverlay: overlay,
-		endpoint:       "",
-	}, nil
-}
-
 func NewCloudAPIAdaptor(provider string, installDir string) (*CloudAPIAdaptor, error) {
 	namespace := "confidential-containers-system"
 
@@ -203,9 +88,17 @@ func NewCloudAPIAdaptor(provider string, installDir string) (*CloudAPIAdaptor, e
 		return nil, err
 	}
 
+	versions, err := utils.GetVersions()
+	if err != nil {
+		return nil, err
+	}
+	ccOperator := versions.Git["coco-operator"]
+
 	return &CloudAPIAdaptor{
 		caaDaemonSet:         &appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "cloud-api-adaptor-daemonset", Namespace: namespace}},
 		ccDaemonSet:          &appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "cc-operator-daemon-install", Namespace: namespace}},
+		ccOpGitRepo:          ccOperator.Url,
+		ccOpGitRef:           ccOperator.Ref,
 		cloudProvider:        provider,
 		controllerDeployment: &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "cc-operator-controller-manager", Namespace: namespace}},
 		namespace:            namespace,
@@ -251,187 +144,6 @@ func GetInstallOverlay(provider string, installDir string) (InstallOverlay, erro
 	return overlayFunc(installDir, provider)
 }
 
-func NewBaseKbsInstallOverlay(installDir string) (InstallOverlay, error) {
-	log.Info("Creating kbs install overlay")
-	overlay, err := NewKustomizeOverlay(filepath.Join(installDir, "kbs/config/kubernetes/base"))
-	if err != nil {
-		return nil, err
-	}
-
-	return &KbsInstallOverlay{
-		overlay: overlay,
-	}, nil
-}
-
-func NewKbsInstallOverlay(installDir string) (InstallOverlay, error) {
-	log.Info("Creating kbs install overlay")
-	overlay, err := NewKustomizeOverlay(filepath.Join(installDir, "kbs/config/kubernetes/nodeport"))
-	if err != nil {
-		return nil, err
-	}
-
-	return &KbsInstallOverlay{
-		overlay: overlay,
-	}, nil
-}
-
-func (lio *KbsInstallOverlay) Apply(ctx context.Context, cfg *envconf.Config) error {
-	return lio.overlay.Apply(ctx, cfg)
-}
-
-func (lio *KbsInstallOverlay) Delete(ctx context.Context, cfg *envconf.Config) error {
-	return lio.overlay.Delete(ctx, cfg)
-}
-
-func (lio *KbsInstallOverlay) Edit(ctx context.Context, cfg *envconf.Config, props map[string]string) error {
-	var err error
-	log.Infof("Updating kbs image with %q", props["KBS_IMAGE"])
-	if err = lio.overlay.SetKustomizeImage("kbs-container-image", "newName", props["KBS_IMAGE"]); err != nil {
-		return err
-	}
-
-	log.Infof("Updating kbs image tag with %q", props["KBS_IMAGE_TAG"])
-	if err = lio.overlay.SetKustomizeImage("kbs-container-image", "newTag", props["KBS_IMAGE_TAG"]); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func getNodeIPForSvc(deploymentName string, service corev1.Service, cfg *envconf.Config) (string, error) {
-	client, err := cfg.NewClient()
-	if err != nil {
-		return "", err
-	}
-	podList := &corev1.PodList{}
-	if err := client.Resources(service.Namespace).List(context.TODO(), podList); err != nil {
-		return "", err
-	}
-
-	nodeList := &corev1.NodeList{}
-	if err := client.Resources("").List(context.TODO(), nodeList); err != nil {
-		return "", err
-	}
-
-	var matchingPod *corev1.Pod
-	for i := range podList.Items {
-		pod := &podList.Items[i]
-		if pod.Labels["app"] == deploymentName {
-			matchingPod = pod
-			break
-		}
-	}
-
-	for _, node := range nodeList.Items {
-		if node.Name == matchingPod.Spec.NodeName {
-			return node.Status.Addresses[0].Address, nil
-		}
-	}
-
-	return "", fmt.Errorf("Node IP not found for Service %s", service.Name)
-}
-
-func (p *KeyBrokerService) GetKbsEndpoint(ctx context.Context, cfg *envconf.Config) (string, error) {
-	client, err := cfg.NewClient()
-	if err != nil {
-		return "", err
-	}
-
-	namespace := "coco-tenant"
-	serviceName := "kbs"
-	deploymentName := "kbs"
-
-	resources := client.Resources(namespace)
-
-	kbsDeployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: deploymentName, Namespace: namespace}}
-	fmt.Printf("Wait for the %s deployment be available\n", deploymentName)
-	if err = wait.For(conditions.New(resources).DeploymentConditionMatch(kbsDeployment, appsv1.DeploymentAvailable, corev1.ConditionTrue),
-		wait.WithTimeout(time.Minute*2)); err != nil {
-		return "", err
-	}
-
-	services := &corev1.ServiceList{}
-	if err := resources.List(context.TODO(), services); err != nil {
-		return "", err
-	}
-
-	for _, service := range services.Items {
-		if service.ObjectMeta.Name == serviceName {
-			// Ensure the service is of type NodePort
-			if service.Spec.Type != corev1.ServiceTypeNodePort {
-				return "", fmt.Errorf("Service %s is not of type NodePort", "kbs")
-			}
-
-			var nodePort int32
-			// Extract NodePort
-			if len(service.Spec.Ports) > 0 {
-				nodePort = service.Spec.Ports[0].NodePort
-			} else {
-				return "", fmt.Errorf("NodePort is not configured for Service %s", "kbs")
-			}
-
-			nodeIP, err := getNodeIPForSvc(deploymentName, service, cfg)
-			if err != nil {
-				return "", err
-			}
-
-			p.endpoint = fmt.Sprintf("http://%s:%d", nodeIP, nodePort)
-			return p.endpoint, nil
-		}
-	}
-
-	return "", fmt.Errorf("Service %s not found", serviceName)
-}
-
-func (p *KeyBrokerService) EnableKbsCustomizedPolicy(customizedOpaFile string) error {
-	kbsClientDir := filepath.Join(TRUSTEE_REPO_PATH, "target/release")
-	privateKey := "../../kbs/config/kubernetes/base/kbs.key"
-	policyFile := filepath.Join("../../kbs/sample_policies", customizedOpaFile)
-	log.Info("EnableKbsCustomizedPolicy: ", policyFile)
-	cmd := exec.Command("./kbs-client", "--url", p.endpoint, "config", "--auth-private-key", privateKey, "set-resource-policy", "--policy-file", policyFile)
-	cmd.Dir = kbsClientDir
-	cmd.Env = os.Environ()
-	stdoutStderr, err := cmd.CombinedOutput()
-	log.Tracef("%v, output: %s", cmd, stdoutStderr)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (p *KeyBrokerService) Deploy(ctx context.Context, cfg *envconf.Config, props map[string]string) error {
-	log.Info("Customize the overlay yaml file")
-	if err := p.installOverlay.Edit(ctx, cfg, props); err != nil {
-		return err
-	}
-
-	// Create kustomize pointer for overlay directory with updated changes
-	tmpoverlay, err := NewKbsInstallOverlay(TRUSTEE_REPO_PATH)
-	if err != nil {
-		return err
-	}
-
-	log.Info("Install Kbs")
-	if err := tmpoverlay.Apply(ctx, cfg); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (p *KeyBrokerService) Delete(ctx context.Context, cfg *envconf.Config) error {
-	// Create kustomize pointer for overlay directory with updated changes
-	tmpoverlay, err := NewKbsInstallOverlay(TRUSTEE_REPO_PATH)
-	if err != nil {
-		return err
-	}
-
-	log.Info("Uninstall the cloud-api-adaptor")
-	if err = tmpoverlay.Delete(ctx, cfg); err != nil {
-		return err
-	}
-	return nil
-}
-
 // Deletes the peer pods installation including the controller manager.
 func (p *CloudAPIAdaptor) Delete(ctx context.Context, cfg *envconf.Config) error {
 	client, err := cfg.NewClient()
@@ -455,7 +167,7 @@ func (p *CloudAPIAdaptor) Delete(ctx context.Context, cfg *envconf.Config) error
 	}
 
 	log.Info("Uninstall CCRuntime CRD")
-	cmd := exec.Command("kubectl", "delete", "-k", "github.com/confidential-containers/operator/config/samples/ccruntime/peer-pods")
+	cmd := exec.Command("kubectl", "delete", "-k", p.ccOpGitRepo+"/config/samples/ccruntime/peer-pods?ref="+p.ccOpGitRef)
 	cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG="+cfg.KubeconfigFile()))
 	stdoutStderr, err := cmd.CombinedOutput()
 	log.Tracef("%v, output: %s", cmd, stdoutStderr)
@@ -475,7 +187,7 @@ func (p *CloudAPIAdaptor) Delete(ctx context.Context, cfg *envconf.Config) error
 	deployments := &appsv1.DeploymentList{Items: []appsv1.Deployment{*p.controllerDeployment}}
 
 	log.Info("Uninstall the controller manager")
-	cmd = exec.Command("kubectl", "delete", "-k", "github.com/confidential-containers/operator/config/default")
+	cmd = exec.Command("kubectl", "delete", "-k", p.ccOpGitRepo+"/operator/config/default?ref="+p.ccOpGitRef)
 	cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG="+cfg.KubeconfigFile()))
 	stdoutStderr, err = cmd.CombinedOutput()
 	log.Tracef("%v, output: %s", cmd, stdoutStderr)
@@ -522,7 +234,7 @@ func (p *CloudAPIAdaptor) Deploy(ctx context.Context, cfg *envconf.Config, props
 
 	log.Info("Install the controller manager")
 	// TODO - find go idiomatic way to apply/delete remote kustomize and apply to this file
-	cmd := exec.Command("kubectl", "apply", "-k", "github.com/confidential-containers/operator/config/default")
+	cmd := exec.Command("kubectl", "apply", "-k", p.ccOpGitRepo+"/config/default?ref="+p.ccOpGitRef)
 	cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG="+cfg.KubeconfigFile()))
 	stdoutStderr, err := cmd.CombinedOutput()
 	log.Tracef("%v, output: %s", cmd, stdoutStderr)
@@ -541,7 +253,7 @@ func (p *CloudAPIAdaptor) Deploy(ctx context.Context, cfg *envconf.Config, props
 		return err
 	}
 
-	cmd = exec.Command("kubectl", "apply", "-k", "github.com/confidential-containers/operator/config/samples/ccruntime/peer-pods")
+	cmd = exec.Command("kubectl", "apply", "-k", p.ccOpGitRepo+"/config/samples/ccruntime/peer-pods?ref="+p.ccOpGitRef)
 	cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG="+cfg.KubeconfigFile()))
 	stdoutStderr, err = cmd.CombinedOutput()
 	log.Tracef("%v, output: %s", cmd, stdoutStderr)

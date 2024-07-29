@@ -48,11 +48,18 @@ To leave the cluster untouched by the execution finish you should export `TEST_T
 
 To use existing cluster which have already installed Cloud API Adaptor, you should export `TEST_INSTALL_CAA=no`.
 
+While in development and/or debugging it's common that you want to run just a sub-set of tests rather than the entire suite. To accomplish that
+you should export an unanchored regular expression in the `RUN_TESTS` variable that matches the tests names (see `-run` in [go test flags](https://pkg.go.dev/cmd/go#hdr-Testing_flags) for the regular expression format accepted). For example, to run only the simple creation pod test:
+```
+$ RUN_TESTS=CreateSimplePod TEST_PROVISION=yes TEST_PODVM_IMAGE="path/to/podvm-base.qcow2" CLOUD_PROVIDER=libvirt make test-e2e
+```
+
 ## Attestation and KBS specific
 
-We need artificats from trustee when do attestation test, to prepare trustee, do as following. 
+We need artifacts from the trustee repo when doing the attestation tests.
+To prepare trustee, execute the following steps:
 
-```
+```sh
 pushd ${cloud-api-adaptor-repo-dir}/src/cloud-api-adaptor/test
 git clone https://github.com/confidential-containers/trustee.git
 pushd trustee
@@ -65,15 +72,18 @@ popd
 ```
 
 We need build and use the PodVM image:
-```
+
+```sh
 pushd ${cloud-api-adaptor}
 make podvm-builder podvm-binaries podvm-image
 popd
 ```
+
 Then extract the PodVM image and use it following [extracting-the-qcow2-image](../../podvm/README.md#extracting-the-qcow2-image)
 
-To deploy the KBS service and test attestation related cases, export following variables like:
-```
+To deploy the KBS service and test attestation related cases, export the following variables like:
+
+```sh
 export DEPLOY_KBS=yes
 export KBS_IMAGE=$(./hack/yq-shim.sh '.oci.kbs.registry' ./versions.yaml)
 export KBS_IMAGE_TAG=$(./hack/yq-shim.sh '.oci.kbs.tag' ./versions.yaml)
@@ -81,7 +91,7 @@ export KBS_IMAGE_TAG=$(./hack/yq-shim.sh '.oci.kbs.tag' ./versions.yaml)
 
 ## Provision file specifics
 
-As mentioned on the previous section, a properties file can be passed to the cloud provisioner that will be used to controll the provisioning operations. The properties are specific of each cloud provider though, see on the sections below.
+As mentioned on the previous section, a properties file can be passed to the cloud provisioner that will be used to control the provisioning operations. The properties are specific of each cloud provider though, see on the sections below.
 
 ### AWS provision properties
 
@@ -125,6 +135,72 @@ Use the properties on the table below for Libvirt:
 |vxlan_port| VXLAN port number||
 |cluster_name|Cluster Name| "peer-pods"|
 
+## Running tests for PodVM with Authenticated Registry
+
+For running e2e test cases specifically for checking PodVM with Image from Authenticated Registry, we need to export following two variables
+- `AUTHENTICATED_REGISTRY_IMAGE` - Name of the image along with the tag from authenticated registry (example: quay.io/kata-containers/confidential-containers-auth:test)
+- `REGISTRY_CREDENTIAL_ENCODED` - Credentials of registry encrypted as BASE64ENCODED(USERNAME:PASSWORD). If you're using quay registry, we can get the encrypted credentials from Account Settings >> Generate Encrypted Password >> Docker Configuration
+
+## Running the e2e Test Suite on an Existing CAA Deployment
+
+To test local changes the test suite can run without provisioning any infrastructure, CoCo or CAA. Make sure your cluster is configured and available via kubectl. You also might need to set up Cloud Provider-specific API access, since some of tests assert conditions for cloud resources.
+
+### Azure
+
+Fill in `RESOURCE_GROUP` and `AZURE_SUBSCRIPTION_ID` with the values you want to use in your test:
+
+```bash
+cd ../.. # go to project root
+cat <<EOF> skip-provisioning.properties
+RESOURCE_GROUP_NAME="..."
+AZURE_SUBSCRIPTION_ID="..."
+AZURE_CLIENT_ID="unused"
+AZURE_TENANT_ID="unused"
+LOCATION="unused"
+AZURE_IMAGE_ID="unused"
+EOF
+```
+
+Run the test suite with the respective flags:
+
+```bash
+make test-e2e \
+CLOUD_PROVIDER=azure \
+TEST_TEARDOWN=no \
+TEST_PROVISION=no \
+TEST_INSTALL_CAA=no \
+TEST_PROVISION_FILE="${PWD}/skip-provisioning.properties" \
+```
+
+### IBM Cloud
+Take region `jp-tok` for example.
+```
+cd ../.. # go to project root
+cat <<EOF> skip-provisioning.properties
+REGION="jp-tok"
+ZONE="jp-tok-1"
+VPC_ID="<vpc-of-worker>"
+VPC_SUBNET_ID="<subnet-of-worker>"
+VPC_SECURITY_GROUP_ID="<security-group-of-vpc>"
+RESOURCE_GROUP_ID="<resource-group-id>"
+IBMCLOUD_PROVIDER="ibmcloud"
+APIKEY="<your-ibmcloud-apikey>"
+
+IAM_SERVICE_URL="https://iam.cloud.ibm.com/identity/token"
+VPC_SERVICE_URL="https://jp-tok.iaas.cloud.ibm.com/v1"
+IKS_SERVICE_URL="https://containers.cloud.ibm.com/global"
+PODVM_IMAGE_ID="<podvm-image-uploaded-previously>"
+INSTANCE_PROFILE_NAME="bz2-2x8"
+PODVM_IMAGE_ARCH="s390x"
+IMAGE_PULL_API_KEY="<can-be-same-as-apikey>"
+CAA_IMAGE_TAG="<caa-image-tag>"
+EOF
+```
+
+- For `INSTANCE_PROFILE_NAME`, if it's not secure execution, the value is started with "bz2". If it's secure execution, the value is started with 'bz2e'. More values can be found through ibmcloud command `ibmcloud is instance-profiles`.
+- For `PODVM_IMAGE_ID`, the vpc image id uploaded to ibmcloud.
+- For `CAA_IMAGE_TAG`, the commit id of project. The commit id can be found here: https://github.com/confidential-containers/cloud-api-adaptor/commits/main/
+
 # Adding support for a new cloud provider
 
 In order to add a test pipeline for a new cloud provider, you will need to implement some
@@ -156,68 +232,3 @@ func TestCloudProviderCreateSimplePod(t *testing.T) {
     DoTestCreateSimplePod(t, assert)
 }
 ```
-## Running tests for PodVM with Authenticated Registry
-
-For running e2e test cases specifically for checking PodVM with Image from Authenticated Registry, we need to export following two variables
-- `AUTHENTICATED_REGISTRY_IMAGE` - Name of the image along with the tag from authenticated registry (example: quay.io/kata-containers/confidential-containers-auth:test)
-- `REGISTRY_CREDENTIAL_ENCODED` - Credentials of registry encrypted as BASE64ENCODED(USERNAME:PASSWORD). If you're using quay registry, we can get the encrypted credentials from Account Settings >> Generate Encrypted Password >> Docker Configuration
-
-## Running the e2e Test Suite on an Existing CAA Deployment
-
-To test local changes the test suite can run without provisioning any infrastructure, CoCo or CAA. Make sure your cluster is configured and available via kubectl. You also might need to set up Cloud Provider-specific API access, since some of tests assert conditions for cloud resources.
-
-## Azure
-
-Fill in `RESOURCE_GROUP` and `AZURE_SUBSCRIPTION_ID` with the values you want to use in your test:
-
-```bash
-cd ../.. # go to project root
-cat <<EOF> skip-provisioning.properties
-RESOURCE_GROUP_NAME="..."
-AZURE_SUBSCRIPTION_ID="..."
-AZURE_CLIENT_ID="unused"
-AZURE_TENANT_ID="unused"
-LOCATION="unused"
-AZURE_IMAGE_ID="unused"
-EOF
-```
-
-Run the test suite with the respective flags:
-
-```bash
-make test-e2e \
-CLOUD_PROVIDER=azure \
-TEST_TEARDOWN=no \
-TEST_PROVISION=no \
-TEST_INSTALL_CAA=no \
-TEST_PROVISION_FILE="${PWD}/skip-provisioning.properties" \
-```
-
-## IBM Cloud
-Take region `jp-tok` for example.
-```
-cd ../.. # go to project root
-cat <<EOF> skip-provisioning.properties
-REGION="jp-tok"
-ZONE="jp-tok-1"
-VPC_ID="<vpc-of-worker>"
-VPC_SUBNET_ID="<subnet-of-worker>"
-VPC_SECURITY_GROUP_ID="<security-group-of-vpc>"
-RESOURCE_GROUP_ID="<resource-group-id>"
-IBMCLOUD_PROVIDER="ibmcloud"
-APIKEY="<your-ibmcloud-apikey>"
-
-IAM_SERVICE_URL="https://iam.cloud.ibm.com/identity/token"
-VPC_SERVICE_URL="https://jp-tok.iaas.cloud.ibm.com/v1"
-IKS_SERVICE_URL="https://containers.cloud.ibm.com/global"
-PODVM_IMAGE_ID="<podvm-image-uploaded-previously>"
-INSTANCE_PROFILE_NAME="bz2-2x8"
-PODVM_IMAGE_ARCH="s390x"
-IMAGE_PULL_API_KEY="<can-be-same-as-apikey>"
-CAA_IMAGE_TAG="<caa-image-tag>"
-EOF
-```
-
-- For `INSTANCE_PROFILE_NAME`, if it's not secure execution, the value is started with "bz2". If it's secure execution, the value is started with 'bz2e'. More values can be found through ibmcloud command `ibmcloud is instance-profiles`.
-- For `PODVM_IMAGE_ID`, the vpc image id uploaded to ibmcloud.
-- For `CAA_IMAGE_TAG`, the commit id of project. The commit id can be found here: https://github.com/confidential-containers/cloud-api-adaptor/commits/main/

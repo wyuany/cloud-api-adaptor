@@ -27,7 +27,11 @@ var E2eNamespace = envconf.RandomName("coco-pp-e2e-test", 25)
 // DoTestCreateSimplePod tests a simple peer-pod can be created.
 func DoTestCreateSimplePod(t *testing.T, e env.Environment, assert CloudAssert) {
 	pod := NewBusyboxPodWithName(E2eNamespace, "simple-test")
-	NewTestCase(t, e, "SimplePeerPod", assert, "PodVM is created").WithPod(pod).WithNydusSnapshotter().Run()
+	if isTestOnCrio() {
+		NewTestCase(t, e, "SimplePeerPod", assert, "PodVM is created").WithPod(pod).Run()
+	} else {
+		NewTestCase(t, e, "SimplePeerPod", assert, "PodVM is created").WithPod(pod).WithNydusSnapshotter().Run()
+	}
 }
 
 func DoTestDeleteSimplePod(t *testing.T, e env.Environment, assert CloudAssert) {
@@ -62,7 +66,6 @@ func DoTestCreatePodWithConfigMap(t *testing.T, e env.Environment, assert CloudA
 				}
 			},
 			TestCommandStderrFn: IsBufferEmpty,
-			TestErrorFn:         IsErrorEmpty,
 		},
 	}
 
@@ -100,7 +103,6 @@ func DoTestCreatePodWithSecret(t *testing.T, e env.Environment, assert CloudAsse
 				}
 			},
 			TestCommandStderrFn: IsBufferEmpty,
-			TestErrorFn:         IsErrorEmpty,
 		},
 		{
 			Command:       []string{"cat", passwordPath},
@@ -115,7 +117,6 @@ func DoTestCreatePodWithSecret(t *testing.T, e env.Environment, assert CloudAsse
 				}
 			},
 			TestCommandStderrFn: IsBufferEmpty,
-			TestErrorFn:         IsErrorEmpty,
 		},
 	}
 
@@ -123,7 +124,11 @@ func DoTestCreatePodWithSecret(t *testing.T, e env.Environment, assert CloudAsse
 }
 
 func DoTestCreatePeerPodContainerWithExternalIPAccess(t *testing.T, e env.Environment, assert CloudAssert) {
-	pod := NewBusyboxPod(E2eNamespace)
+	// This test requires a container with the right capability otherwise the following error will be thrown:
+	// / # ping 8.8.8.8
+	// PING 8.8.8.8 (8.8.8.8): 56 data bytes
+	// ping: permission denied (are you root?)
+	pod := NewPrivPod(E2eNamespace, "busybox-priv")
 	testCommands := []TestCommand{
 		{
 			Command:       []string{"ping", "-c", "1", "www.google.com"},
@@ -138,7 +143,6 @@ func DoTestCreatePeerPodContainerWithExternalIPAccess(t *testing.T, e env.Enviro
 				}
 			},
 			TestCommandStderrFn: IsBufferEmpty,
-			TestErrorFn:         IsErrorEmpty,
 		},
 	}
 
@@ -207,7 +211,12 @@ func DoTestCreatePeerPodAndCheckEnvVariableLogsWithImageAndDeployment(t *testing
 func DoTestCreatePeerPodWithLargeImage(t *testing.T, e env.Environment, assert CloudAssert) {
 	podName := "largeimage-pod"
 	imageName := "quay.io/confidential-containers/test-images:largeimage"
-	pod := NewPod(E2eNamespace, podName, podName, imageName, WithRestartPolicy(v1.RestartPolicyOnFailure))
+	// Need more timeout to pull large image data
+	timeout := "300"
+	annotationData := map[string]string{
+		"io.katacontainers.config.runtime.create_container_timeout": timeout,
+	}
+	pod := NewPod(E2eNamespace, podName, podName, imageName, WithRestartPolicy(v1.RestartPolicyOnFailure), WithAnnotations(annotationData))
 	NewTestCase(t, e, "LargeImagePeerPod", assert, "Peer pod with Large Image has been created").WithPod(pod).WithPodWatcher().Run()
 }
 
@@ -226,7 +235,6 @@ func DoTestCreatePeerPodWithPVCAndCSIWrapper(t *testing.T, e env.Environment, as
 				}
 			},
 			TestCommandStderrFn: IsBufferEmpty,
-			TestErrorFn:         IsErrorEmpty,
 		},
 	}
 	NewTestCase(t, e, "PeerPodWithPVCAndCSIWrapper", assert, "PVC is created and mounted as expected").WithPod(pod).WithPVC(myPVC).WithTestCommands(testCommands).Run()
@@ -577,7 +585,7 @@ func DoTestKbsKeyRelease(t *testing.T, e env.Environment, assert CloudAssert) {
 			ContainerName: pod.Spec.Containers[0].Name,
 			TestCommandStdoutFn: func(stdout bytes.Buffer) bool {
 				if strings.Contains(stdout.String(), "This is my cluster name") {
-					log.Infof("Success to get key.bin %s", stdout.String())
+					log.Infof("Success to get key.bin: %s", stdout.String())
 					return true
 				} else {
 					log.Errorf("Failed to access key.bin: %s", stdout.String())
@@ -595,23 +603,184 @@ func DoTestKbsKeyRelease(t *testing.T, e env.Environment, assert CloudAssert) {
 func DoTestKbsKeyReleaseForFailure(t *testing.T, e env.Environment, assert CloudAssert) {
 
 	log.Info("Do test kbs key release failure case")
-	pod := NewCurlPodWithName(E2eNamespace, "curl-failure")
+	pod := NewBusyboxPodWithName(E2eNamespace, "busybox-wget-failure")
 	testCommands := []TestCommand{
 		{
-			Command:       []string{"curl", "-s", "http://127.0.0.1:8006/cdh/resource/reponame/workload_key/key.bin"},
+			Command:       []string{"wget", "-q", "-O-", "http://127.0.0.1:8006/cdh/resource/reponame/workload_key/key.bin"},
 			ContainerName: pod.Spec.Containers[0].Name,
-			TestCommandStdoutFn: func(stdout bytes.Buffer) bool {
-				body := stdout.String()
-				if strings.Contains(strings.ToLower(body), "error") {
-					log.Infof("Pass failure case as: %s", stdout.String())
+			TestErrorFn: func(err error) bool {
+				if strings.Contains(err.Error(), "command terminated with exit code 1") {
 					return true
 				} else {
-					log.Errorf("Failed to faliure case as: %s", stdout.String())
+					log.Errorf("Got unexpected error: %s", err.Error())
 					return false
+				}
+			},
+			TestCommandStdoutFn: func(stdout bytes.Buffer) bool {
+				if strings.Contains(stdout.String(), "This is my cluster name") {
+					log.Errorf("FAIL as successed to get key.bin: %s", stdout.String())
+					return false
+				} else {
+					log.Infof("PASS as failed to access key.bin: %s", stdout.String())
+					return true
 				}
 			},
 		},
 	}
 
 	NewTestCase(t, e, "DoTestKbsKeyReleaseForFailure", assert, "Kbs key release is failed").WithPod(pod).WithTestCommands(testCommands).Run()
+}
+
+// Test to check for specific key value from Trustee Operator Deployment
+func DoTestTrusteeOperatorKeyReleaseForSpecificKey(t *testing.T, e env.Environment, assert CloudAssert) {
+
+	log.Info("Do test Trustee operator key release for specific key")
+	pod := NewBusyboxPodWithName(E2eNamespace, "busybox-wget")
+	testCommands := []TestCommand{
+		{
+			Command:       []string{"wget", "-q", "-O-", "http://127.0.0.1:8006/cdh/resource/default/kbsres1/key1"},
+			ContainerName: pod.Spec.Containers[0].Name,
+			TestCommandStdoutFn: func(stdout bytes.Buffer) bool {
+				if strings.Contains(stdout.String(), "res1val1") {
+					log.Infof("Success to get key %s", stdout.String())
+					return true
+				} else {
+					log.Errorf("Failed to access key: %s", stdout.String())
+					return false
+				}
+			},
+		},
+	}
+
+	NewTestCase(t, e, "KbsKeyReleasePod", assert, "Kbs key release from Trustee Operator is successful").WithPod(pod).WithTestCommands(testCommands).Run()
+}
+
+func DoTestRestrictivePolicyBlocksExec(t *testing.T, e env.Environment, assert CloudAssert) {
+	allowAllExceptExecPolicyFilePath := "fixtures/policies/allow-all-except-exec-process.rego"
+	podName := "policy-exec-rejected"
+	pod := NewPodWithPolicy(E2eNamespace, podName, allowAllExceptExecPolicyFilePath)
+
+	testCommands := []TestCommand{
+		{
+			Command:       []string{"ls"},
+			ContainerName: pod.Spec.Containers[0].Name,
+			TestErrorFn: func(err error) bool {
+				if strings.Contains(err.Error(), "failed to exec in container") && strings.Contains(err.Error(), "ExecProcessRequest is blocked by policy") {
+					log.Infof("Exec process was blocked %s", err.Error())
+					return true
+				} else {
+					log.Errorf("Exec process was allowed: %s", err.Error())
+					return false
+				}
+			},
+		},
+	}
+	NewTestCase(t, e, "PodVMwithPolicyBlockingExec", assert, "Pod which blocks Exec Process").WithPod(pod).WithTestCommands(testCommands).Run()
+}
+
+func DoTestPermissivePolicyAllowsExec(t *testing.T, e env.Environment, assert CloudAssert) {
+	allowAllPolicyFilePath := "fixtures/policies/allow-all.rego"
+	podName := "policy-all-allowed"
+	pod := NewPodWithPolicy(E2eNamespace, podName, allowAllPolicyFilePath)
+
+	// Just check there are no errors and something returned
+	testCommands := []TestCommand{
+		{
+			Command:       []string{"ls"},
+			ContainerName: pod.Spec.Containers[0].Name,
+			TestCommandStdoutFn: func(stdout bytes.Buffer) bool {
+				return stdout.Len() > 0
+			},
+			TestCommandStderrFn: IsBufferEmpty,
+		},
+	}
+	NewTestCase(t, e, "PodVMwithPermissivePolicy", assert, "Pod which allows all kata agent APIs").WithPod(pod).WithTestCommands(testCommands).Run()
+}
+
+// Test to run pod with io.Kubernetes.cri-o.Devices annotation and check the devices are created in the pod
+func DoTestPodWithCrioDeviceAnnotation(t *testing.T, e env.Environment, assert CloudAssert) {
+	podName := "pod-with-devices"
+	containerName := "busybox"
+	imageName := BUSYBOX_IMAGE
+	devicesAnnotation := map[string]string{
+		"io.kubernetes.cri-o.Devices": "/dev/fuse",
+	}
+	pod := NewPod(E2eNamespace, podName, containerName, imageName, WithRestartPolicy(v1.RestartPolicyNever), WithAnnotations(devicesAnnotation), WithCommand([]string{"/bin/sh", "-c", "sleep 3600"}))
+
+	testCommands := []TestCommand{
+		{
+			Command:       []string{"ls", "/dev/fuse"},
+			ContainerName: pod.Spec.Containers[0].Name,
+			TestCommandStdoutFn: func(stdout bytes.Buffer) bool {
+				if strings.Contains(stdout.String(), "/dev/fuse") {
+					log.Infof("Device /dev/fuse is created in the pod")
+					return true
+				} else {
+					log.Errorf("Device /dev/fuse is not created in the pod")
+					return false
+				}
+			},
+			TestCommandStderrFn: IsBufferEmpty,
+		},
+	}
+
+	NewTestCase(t, e, "PodWithDevicesAnnotation", assert, "Pod with devices annotation").WithPod(pod).WithTestCommands(testCommands).Run()
+}
+
+// Test to run pod with incorrect annotation and check the devices are not created in the pod
+func DoTestPodWithIncorrectCrioDeviceAnnotation(t *testing.T, e env.Environment, assert CloudAssert) {
+	podName := "pod-with-devices"
+	containerName := "busybox"
+	imageName := BUSYBOX_IMAGE
+	devicesAnnotation := map[string]string{
+		"io.kubernetes.cri.Dev": "/dev/fuse",
+	}
+	pod := NewPod(E2eNamespace, podName, containerName, imageName, WithRestartPolicy(v1.RestartPolicyNever), WithAnnotations(devicesAnnotation), WithCommand([]string{"/bin/sh", "-c", "sleep 3600"}))
+
+	testCommands := []TestCommand{
+		{
+			Command:             []string{"ls", "/dev/fuse"},
+			ContainerName:       pod.Spec.Containers[0].Name,
+			TestCommandStdoutFn: IsBufferEmpty,
+			TestCommandStderrFn: func(stderr bytes.Buffer) bool {
+				if strings.Contains(stderr.String(), "No such file or directory") {
+					log.Infof("Device /dev/fuse is not created in the pod")
+					return true
+				} else {
+					log.Errorf("Device /dev/fuse is created in the pod")
+					return false
+				}
+			},
+			// The command should throw the following error
+			// "command terminated with exit code 1"
+			TestErrorFn: func(err error) bool {
+				if strings.Contains(err.Error(), "command terminated with exit code 1") {
+					log.Infof("Command terminated with exit code 1")
+					return true
+				} else {
+					log.Errorf("Command did not terminate with exit code 1")
+					return false
+				}
+
+			},
+		},
+	}
+
+	NewTestCase(t, e, "PodWithIncorrectDevicesAnnotation", assert, "Pod with incorrect devices annotation").WithPod(pod).WithTestCommands(testCommands).Run()
+}
+
+// Test to run a pod with init container and check the init container is executed successfully
+func DoTestPodWithInitContainer(t *testing.T, e env.Environment, assert CloudAssert) {
+
+	pod := NewPodWithInitContainer(E2eNamespace, "pod-with-init-container")
+
+	NewTestCase(t, e, "PodWithInitContainer", assert, "Pod with init container").WithPod(pod).Run()
+
+}
+
+// Test to run specific commands in a pod and check the output
+func DoTestPodWithSpecificCommands(t *testing.T, e env.Environment, assert CloudAssert, testCommands []TestCommand) {
+	pod := NewBusyboxPodWithName(E2eNamespace, "simple-test")
+
+	NewTestCase(t, e, "PodWithSpecificCommands", assert, "Pod with specific commands").WithPod(pod).WithTestCommands(testCommands).Run()
 }

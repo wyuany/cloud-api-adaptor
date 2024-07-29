@@ -1,7 +1,8 @@
 #!/bin/bash
 
-GO_VERSION="1.21.11"
-RUST_VERSION="1.72.0"
+# FIXME to pickup these values from versions.yaml
+GO_VERSION="1.21.12"
+RUST_VERSION="1.75.0"
 SKOPEO_VERSION="1.5.0"
 
 # Install dependencies

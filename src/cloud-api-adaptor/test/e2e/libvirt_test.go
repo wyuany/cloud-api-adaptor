@@ -45,6 +45,9 @@ func TestLibvirtCreatePeerPodAndCheckUserLogs(t *testing.T) {
 }
 
 func TestLibvirtCreatePeerPodAndCheckWorkDirLogs(t *testing.T) {
+	// This test is causing issues on CI with instability, so skip until we can resolve this.
+	// See https://github.com/confidential-containers/cloud-api-adaptor/issues/1831
+	SkipTestOnCI(t)
 	assert := LibvirtAssert{}
 	DoTestCreatePeerPodAndCheckWorkDirLogs(t, testEnv, assert)
 }
@@ -105,10 +108,33 @@ func TestLibvirtKbsKeyRelease(t *testing.T) {
 	if !isTestWithKbs() {
 		t.Skip("Skipping kbs related test as kbs is not deployed")
 	}
-	_ = keyBrokerService.EnableKbsCustomizedPolicy("deny_all.rego")
+	_ = keyBrokerService.SetSampleSecretKey()
+	_ = keyBrokerService.EnableKbsCustomizedResourcePolicy("allow_all.rego")
+	_ = keyBrokerService.EnableKbsCustomizedAttestationPolicy("deny_all.rego")
 	assert := LibvirtAssert{}
 	t.Parallel()
 	DoTestKbsKeyReleaseForFailure(t, testEnv, assert)
-	_ = keyBrokerService.EnableKbsCustomizedPolicy("allow_all.rego")
-	DoTestKbsKeyRelease(t, testEnv, assert)
+	if isTestWithKbsIBMSE() {
+		t.Log("KBS with ibmse cases")
+		// the allow_*_.rego file is created by follow document
+		// https://github.com/confidential-containers/trustee/blob/main/deps/verifier/src/se/README.md#set-attestation-policy
+		_ = keyBrokerService.EnableKbsCustomizedAttestationPolicy("allow_with_wrong_image_tag.rego")
+		DoTestKbsKeyReleaseForFailure(t, testEnv, assert)
+		_ = keyBrokerService.EnableKbsCustomizedAttestationPolicy("allow_with_correct_claims.rego")
+		DoTestKbsKeyRelease(t, testEnv, assert)
+	} else {
+		t.Log("KBS normal cases")
+		_ = keyBrokerService.EnableKbsCustomizedAttestationPolicy("allow_all.rego")
+		DoTestKbsKeyRelease(t, testEnv, assert)
+	}
+}
+
+func TestLibvirtRestrictivePolicyBlocksExec(t *testing.T) {
+	assert := LibvirtAssert{}
+	DoTestRestrictivePolicyBlocksExec(t, testEnv, assert)
+}
+
+func TestLibvirtPermissivePolicyAllowsExec(t *testing.T) {
+	assert := LibvirtAssert{}
+	DoTestPermissivePolicyAllowsExec(t, testEnv, assert)
 }

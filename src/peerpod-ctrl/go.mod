@@ -3,7 +3,7 @@ module github.com/confidential-containers/cloud-api-adaptor/src/peerpod-ctrl
 go 1.21
 
 require (
-	github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers v0.9.0-alpha1-alpha.1
+	github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers v0.9.0-alpha.3
 	github.com/onsi/ginkgo/v2 v2.8.1
 	github.com/onsi/gomega v1.27.1
 	k8s.io/api v0.26.0
@@ -67,7 +67,7 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kdomanski/iso9660 v0.4.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
-	github.com/leodido/go-urn v1.2.3 // indirect
+	github.com/leodido/go-urn v1.2.4 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.2 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect

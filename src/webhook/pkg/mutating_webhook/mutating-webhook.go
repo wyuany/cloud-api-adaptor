@@ -31,32 +31,23 @@ import (
 // podMutator mutates Pods
 type PodMutator struct {
 	Client  client.Client
-	decoder *admission.Decoder
+	Decoder *admission.Decoder
 }
 
 // podMutator adds peer-pod extended resource to the pod spec add removes all other resource specs
 func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	pod := &corev1.Pod{}
 
-	err := a.decoder.Decode(req, pod)
+	err := a.Decoder.Decode(req, pod)
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
-	mutatedPod, _ := removePodResourceSpec(pod)
+	mutatedPod, _ := a.mutatePod(pod)
 	marshaledPod, err := json.Marshal(mutatedPod)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
-}
-
-// podMutator implements admission.DecoderInjector.
-// A decoder will be automatically injected.
-
-// InjectDecoder injects the decoder.
-func (a *PodMutator) InjectDecoder(d *admission.Decoder) error {
-	a.decoder = d
-	return nil
 }

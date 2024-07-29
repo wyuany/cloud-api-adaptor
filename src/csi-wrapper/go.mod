@@ -3,13 +3,13 @@ module github.com/confidential-containers/cloud-api-adaptor/src/csi-wrapper
 go 1.21
 
 require (
-	github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor v0.9.0-alpha1-alpha.1
+	github.com/confidential-containers/cloud-api-adaptor/src/cloud-api-adaptor v0.9.0-alpha.3
 	github.com/container-storage-interface/spec v1.8.0
 	github.com/containerd/ttrpc v1.2.3
 	github.com/gofrs/uuid v4.4.0+incompatible
 	github.com/golang/glog v1.1.2
 	github.com/golang/protobuf v1.5.4
-	github.com/kata-containers/kata-containers/src/runtime v0.0.0-20240617195946-7df221a8f968
+	github.com/kata-containers/kata-containers/src/runtime v0.0.0-20240717205640-6aff5f300a98
 	golang.org/x/net v0.26.0
 	google.golang.org/grpc v1.61.2
 	k8s.io/apimachinery v0.26.2

@@ -1,3 +1,5 @@
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fconfidential-containers%2Fcloud-api-adaptor.svg?type=shield&issueType=license)](https://app.fossa.com/projects/git%2Bgithub.com%2Fconfidential-containers%2Fcloud-api-adaptor?ref=badge_shield&issueType=license)
+
 [![daily e2e tests for libvirt](https://github.com/confidential-containers/cloud-api-adaptor/actions/workflows/daily-e2e-tests-libvirt.yaml/badge.svg)](https://github.com/confidential-containers/cloud-api-adaptor/actions/workflows/daily-e2e-tests-libvirt.yaml)
 
 [![daily e2e tests for azure](https://github.com/confidential-containers/cloud-api-adaptor/actions/workflows/azure-e2e-test.yml/badge.svg)](https://github.com/confidential-containers/cloud-api-adaptor/actions/workflows/azure-e2e-test.yml)
@@ -15,7 +17,7 @@ or nested virtualisation support.
 
 The background and description of the components involved in 'peer pods' can be found in the [architecture documentation](./docs/architecture.md).
 
-## Cloud Proviers
+## Cloud Providers
 [cloud-providers](./src/cloud-providers/) Cloud Providers for Kata remote hypervisor
 
 ## PeerPod controller

@@ -35,6 +35,7 @@ type AzureProperties struct {
 	IsSelfManaged       bool
 	KbsImage            string
 	KbsImageTag         string
+	Tags                string
 
 	InstanceSize string
 	NodeName     string
@@ -46,7 +47,8 @@ type AzureProperties struct {
 	ManagedAksClient                   *armcontainerservice.ManagedClustersClient
 	ManagedVmClient                    *armcompute.VirtualMachinesClient
 	FederatedIdentityCredentialsClient *armmsi.FederatedIdentityCredentialsClient
-	federatedIdentityCredentialName    string
+	FederatedCredentialName            string
+	ContainerRuntime                   string
 }
 
 var AzureProps = &AzureProperties{}
@@ -55,20 +57,23 @@ func initAzureProperties(properties map[string]string) error {
 	log.Trace("initAzureProperties()")
 
 	AzureProps = &AzureProperties{
-		SubscriptionID:      properties["AZURE_SUBSCRIPTION_ID"],
-		ClientID:            properties["AZURE_CLIENT_ID"],
-		ResourceGroupName:   properties["RESOURCE_GROUP_NAME"],
-		ClusterName:         properties["CLUSTER_NAME"],
-		Location:            properties["LOCATION"],
-		SSHKeyID:            properties["SSH_KEY_ID"],
-		ImageID:             properties["AZURE_IMAGE_ID"],
-		SubnetID:            properties["AZURE_SUBNET_ID"],
-		SshUserName:         properties["SSH_USERNAME"],
-		ManagedIdentityName: properties["MANAGED_IDENTITY_NAME"],
-		CaaImage:            properties["CAA_IMAGE"],
-		KbsImage:            properties["KBS_IMAGE"],
-		KbsImageTag:         properties["KBS_IMAGE_TAG"],
-		InstanceSize:        properties["AZURE_INSTANCE_SIZE"],
+		SubscriptionID:          properties["AZURE_SUBSCRIPTION_ID"],
+		ClientID:                properties["AZURE_CLIENT_ID"],
+		ResourceGroupName:       properties["RESOURCE_GROUP_NAME"],
+		ClusterName:             properties["CLUSTER_NAME"],
+		Location:                properties["LOCATION"],
+		SSHKeyID:                properties["SSH_KEY_ID"],
+		ImageID:                 properties["AZURE_IMAGE_ID"],
+		SubnetID:                properties["AZURE_SUBNET_ID"],
+		SshUserName:             properties["SSH_USERNAME"],
+		ManagedIdentityName:     properties["MANAGED_IDENTITY_NAME"],
+		CaaImage:                properties["CAA_IMAGE"],
+		KbsImage:                properties["KBS_IMAGE"],
+		KbsImageTag:             properties["KBS_IMAGE_TAG"],
+		InstanceSize:            properties["AZURE_INSTANCE_SIZE"],
+		Tags:                    properties["TAGS"],
+		FederatedCredentialName: properties["FEDERATED_CREDENTIAL_NAME"],
+		ContainerRuntime:        properties["CONTAINER_RUNTIME"],
 	}
 
 	CIManagedStr := properties["IS_CI_MANAGED_CLUSTER"]
@@ -117,7 +122,9 @@ func initAzureProperties(properties map[string]string) error {
 		return fmt.Errorf("initializing managed clients: %w", err)
 	}
 
-	AzureProps.federatedIdentityCredentialName = fmt.Sprintf("%sFederatedIdentityCredential", AzureProps.ClusterName)
+	if AzureProps.FederatedCredentialName == "" {
+		AzureProps.FederatedCredentialName = fmt.Sprintf("%sFederatedIdentityCredential", AzureProps.ClusterName)
+	}
 
 	return nil
 }

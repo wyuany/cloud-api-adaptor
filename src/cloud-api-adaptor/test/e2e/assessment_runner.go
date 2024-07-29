@@ -393,8 +393,9 @@ func (tc *TestCase) Run() {
 
 							}
 							if profile != "" {
+								t.Logf("PodVM Created with Instance Type: %v", profile)
 								if !tc.testInstanceTypes.testSuccessfn(profile) {
-									t.Fatal(fmt.Errorf("PodVM Created with Differenct Instance Type %v", profile))
+									t.Fatal(fmt.Errorf("PodVM Created with Different Instance Type %v", profile))
 								}
 							}
 							break
@@ -422,7 +423,7 @@ func (tc *TestCase) Run() {
 					tc.assert.HasPodVM(t, tc.pod.Name)
 				}
 
-				if tc.podState != v1.PodRunning {
+				if tc.podState != v1.PodRunning && tc.podState != v1.PodSucceeded {
 					profile, error := tc.assert.GetInstanceType(t, tc.pod.Name)
 					if error != nil {
 						if error.Error() == "Failed to Create PodVM Instance" {

@@ -4,6 +4,7 @@
 package e2e
 
 import (
+	b64 "encoding/base64"
 	"net"
 	"os"
 	"testing"
@@ -23,13 +24,26 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const CURL_IMAGE = "quay.io/curl/curl:latest"
 const BUSYBOX_IMAGE = "quay.io/prometheus/busybox:latest"
 const WAIT_DEPLOYMENT_AVAILABLE_TIMEOUT = time.Second * 180
 const DEFAULT_AUTH_SECRET = "auth-json-secret-default"
 
 func isTestWithKbs() bool {
-	return os.Getenv("DEPLOY_KBS") == "true" || os.Getenv("DEPLOY_KBS") == "yes"
+	return os.Getenv("TEST_KBS") == "yes"
+}
+
+// Setup of Trustee Operator is required for this test
+// And is not handled as part of provisioning
+func isTestWithTrusteeOperator() bool {
+	return os.Getenv("TEST_TRUSTEE_OPERATOR") == "yes"
+}
+
+func isTestWithKbsIBMSE() bool {
+	return os.Getenv("IBM_SE_CREDS_DIR") != ""
+}
+
+func isTestOnCrio() bool {
+	return os.Getenv("CONTAINER_RUNTIME") == "crio"
 }
 
 type PodOption func(*corev1.Pod)
@@ -120,6 +134,20 @@ func WithLabel(data map[string]string) PodOption {
 	}
 }
 
+// Option to handle SecurityContext
+func WithSecurityContext(sc *corev1.SecurityContext) PodOption {
+	return func(p *corev1.Pod) {
+		p.Spec.Containers[0].SecurityContext = sc
+	}
+}
+
+// Option to add InitContainers
+func WithInitContainers(initContainers []corev1.Container) PodOption {
+	return func(p *corev1.Pod) {
+		p.Spec.InitContainers = initContainers
+	}
+}
+
 func NewPod(namespace string, podName string, containerName string, imageName string, options ...PodOption) *corev1.Pod {
 	runtimeClassName := "kata-remote"
 	pod := &corev1.Pod{
@@ -141,12 +169,44 @@ func NewBusyboxPod(namespace string) *corev1.Pod {
 	return NewBusyboxPodWithName(namespace, "busybox")
 }
 
-func NewCurlPodWithName(namespace, podName string) *corev1.Pod {
-	return NewPod(namespace, podName, "curl", CURL_IMAGE, WithCommand([]string{"/bin/sh", "-c", "sleep 3600"}))
+func NewPrivPod(namespace string, podName string) *corev1.Pod {
+	sc := &corev1.SecurityContext{
+		Privileged: func(b bool) *bool { return &b }(true),
+	}
+	return NewPod(namespace, podName, "busybox", BUSYBOX_IMAGE, WithCommand([]string{"/bin/sh", "-c", "sleep 3600"}), WithSecurityContext(sc))
+}
+
+// Method to create a Pod with initContainer
+func NewPodWithInitContainer(namespace string, podName string) *corev1.Pod {
+
+	initContainer := []corev1.Container{
+		{
+			Name:    "init-container",
+			Image:   BUSYBOX_IMAGE,
+			Command: []string{"/bin/sh", "-c", "echo 'init container'"},
+		},
+	}
+
+	return NewPod(namespace, podName, "busybox", BUSYBOX_IMAGE, WithCommand([]string{"/bin/sh", "-c", "sleep 3600"}), WithInitContainers(initContainer))
 }
 
 func NewBusyboxPodWithName(namespace, podName string) *corev1.Pod {
 	return NewPod(namespace, podName, "busybox", BUSYBOX_IMAGE, WithCommand([]string{"/bin/sh", "-c", "sleep 3600"}))
+}
+
+func NewPodWithPolicy(namespace, podName, policyFilePath string) *corev1.Pod {
+	policyString, err := os.ReadFile(policyFilePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	encodedPolicy := b64.StdEncoding.EncodeToString([]byte(policyString))
+
+	containerName := "busybox"
+	imageName := BUSYBOX_IMAGE
+	annotationData := map[string]string{
+		"io.katacontainers.config.agent.policy": encodedPolicy,
+	}
+	return NewPod(namespace, podName, containerName, imageName, WithCommand([]string{"/bin/sh", "-c", "sleep 3600"}), WithAnnotations(annotationData))
 }
 
 // NewConfigMap returns a new config map object.

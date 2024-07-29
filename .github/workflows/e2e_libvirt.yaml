@@ -98,6 +98,8 @@ jobs:
 
       - name: Checkout kbs Repository and build kbs-client
         run: |
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential pkg-config libssl-dev
           git clone "${KBS_REPO}" test/trustee
           pushd test/trustee
           git checkout "${KBS_VERSION}"
@@ -110,6 +112,9 @@ jobs:
 
       - name: run tests
         id: runTests
+        env:
+          AUTHENTICATED_REGISTRY_IMAGE: ${{ vars.AUTHENTICATED_REGISTRY_IMAGE }}
+          REGISTRY_CREDENTIAL_ENCODED: ${{ secrets.REGISTRY_CREDENTIAL_ENCODED }}
         run: |
           export CLOUD_PROVIDER=libvirt
           export DEPLOY_KBS=true

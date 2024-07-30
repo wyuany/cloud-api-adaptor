@@ -5,12 +5,10 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/avast/retry-go/v4"
@@ -22,14 +20,21 @@ import (
 )
 
 const (
-	InitdataMeta   = "/run/peerpod/initdata.meta"
-	AuthJsonPath   = "/run/peerpod/auth.json"
-	CheckSumPath   = "/run/peerpod/checksum.txt"
-	ConfigParent   = "/run/peerpod"
-	DaemonJsonName = "daemon.json"
+	ConfigParent = "/run/peerpod"
+
+	AaCfgPath     = "/run/peerpod/aa.toml"
+	AgentCfgPath  = "/run/peerpod/agent-config.toml"
+	AuthJsonPath  = "/run/peerpod/auth.json"
+	CdhCfgPath    = "/run/peerpod/cdh.toml"
+	DaemonCfgPath = "/run/peerpod/daemon.json"
+
+	InitdataMeta = "/run/peerpod/initdata.meta"
+	CheckSumPath = "/run/peerpod/checksum.txt"
 )
 
 var logger = log.New(log.Writer(), "[userdata/provision] ", log.LstdFlags|log.Lmsgprefix)
+
+var StaticFiles = []string{"/run/peerpod/aa.toml", "/run/peerpod/cdh.toml", "/run/peerpod/policy.rego"}
 
 type paths struct {
 	aaConfig     string
@@ -40,26 +45,35 @@ type paths struct {
 }
 
 type Config struct {
-	parentPath   string
-	initdataMeta string
-	authJsonPath string
-	checksumPath string
-	staticFiles  []string
 	fetchTimeout int
+	paths        paths
+	checksumPath string
+	initdataMeta string
+	parentPath   string
+	staticFiles  []string
 }
 
-func NewConfig(aaConfigPath, agentConfig, authJsonPath, daemonConfigPath, cdhConfig string, fetchTimeout int) *Config {
+func NewConfig(fetchTimeout int) *Config {
 	ps := paths{
-		aaConfig:     aaConfigPath,
-		agentConfig:  agentConfig,
-		authJson:     authJsonPath,
-		cdhConfig:    cdhConfig,
-		daemonConfig: daemonConfigPath,
+		aaConfig:     AaCfgPath,
+		agentConfig:  AgentCfgPath,
+		authJson:     AuthJsonPath,
+		cdhConfig:    CdhCfgPath,
+		daemonConfig: DaemonCfgPath,
 	}
 	return &Config{
 		fetchTimeout: fetchTimeout,
 		paths:        ps,
+		parentPath:   ConfigParent,
+		initdataMeta: InitdataMeta,
+		checksumPath: CheckSumPath,
+		staticFiles:  StaticFiles,
 	}
+}
+
+type entry struct {
+	path     string
+	optional bool
 }
 
 type WriteFile struct {
@@ -183,32 +197,28 @@ func findConfigEntry(path string, cc *CloudConfig) []byte {
 	return nil
 }
 
-type entry struct {
-	path     string
-	optional bool
-}
-
-func (f *entry) writeFile(cc *CloudConfig) error {
-	bytes := findConfigEntry(f.path, cc)
-	if bytes == nil {
-		if !f.optional {
-			return fmt.Errorf("failed to find %s entry in cloud config", f.path)
-		}
-		return nil
-	}
-
+func writeFile(path string, bytes []byte) error {
 	// Ensure the parent directory exists
-	err := os.MkdirAll(filepath.Dir(f.path), 0755)
+	err := os.MkdirAll(filepath.Dir(path), 0755)
 	if err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	err = os.WriteFile(f.path, bytes, 0644)
+	err = os.WriteFile(path, bytes, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write file %s: %w", path, err)
 	}
-	logger.Printf("Wrote %s\n", f.path)
+	logger.Printf("Wrote %s\n", path)
 	return nil
+}
+
+func isPredefinedConfigEntry(path string, entries []entry) bool {
+	for _, e := range entries {
+		if e.path == path {
+			return true
+		}
+	}
+	return false
 }
 
 func processCloudConfig(cfg *Config, cc *CloudConfig) error {
@@ -220,11 +230,76 @@ func processCloudConfig(cfg *Config, cc *CloudConfig) error {
 		{path: cfg.paths.authJson, optional: true},
 	}
 
+	// entries pre-defined
 	for _, e := range entries {
-		err := e.writeFile(cc)
+		bytes := findConfigEntry(e.path, cc)
+		if bytes == nil {
+			if !e.optional {
+				return fmt.Errorf("failed to find %s entry in cloud config", e.path)
+			}
+			continue
+		}
+		err := writeFile(e.path, bytes)
 		if err != nil {
 			return err
 		}
+	}
+
+	// entries not pre-defined by caa, we have some special config for some specific providers, handle it here...
+	for _, wf := range cc.WriteFiles {
+		path := wf.Path
+		bytes := []byte(wf.Content)
+		if bytes != nil && !isPredefinedConfigEntry(path, entries) {
+			if err := writeFile(path, bytes); err != nil {
+				return fmt.Errorf("failed to write config file %s: %w", path, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func calculateUserDataHash(cfg *Config) error {
+	initToml, err := os.ReadFile(cfg.initdataMeta)
+	if err != nil {
+		return err
+	}
+	var initdata InitData
+	err = toml.Unmarshal(initToml, &initdata)
+	if err != nil {
+		return err
+	}
+
+	checksumStr := ""
+	var byteData []byte
+	for _, file := range cfg.staticFiles {
+		if _, err := os.Stat(file); err == nil {
+			logger.Printf("calculateUserDataHash and reading file %s\n", file)
+			bytes, err := os.ReadFile(file)
+			if err != nil {
+				return fmt.Errorf("Error reading file %s: %v", file, err)
+			}
+			byteData = append(byteData, bytes...)
+		}
+	}
+
+	switch initdata.Algorithom {
+	case "sha256":
+		hash := sha256.Sum256(byteData)
+		checksumStr = hex.EncodeToString(hash[:])
+	case "sha384":
+		hash := sha512.Sum384(byteData)
+		checksumStr = hex.EncodeToString(hash[:])
+	case "sha512":
+		hash := sha512.Sum512(byteData)
+		checksumStr = hex.EncodeToString(hash[:])
+	default:
+		return fmt.Errorf("Error creating initdata hash, the algorothom %s not supported", initdata.Algorithom)
+	}
+
+	err = os.WriteFile(cfg.checksumPath, []byte(checksumStr), 0644) // the hash in CheckSumPath will also be used by attester
+	if err != nil {
+		return fmt.Errorf("failed to write file %s: %w", cfg.checksumPath, err)
 	}
 
 	return nil

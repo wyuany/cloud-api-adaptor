@@ -295,9 +295,7 @@ func TestProcessCloudConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
-	newTmpDaemonConfigFile := tmpDaemonConfigFile.Name() + "-" + DaemonJsonName
-	_ = os.Rename(tmpDaemonConfigFile.Name(), newTmpDaemonConfigFile)
-	defer os.Remove(newTmpDaemonConfigFile)
+	defer os.Remove(tmpDaemonConfigFile.Name())
 
 	// create temporary auth json file
 	tmpAuthJsonFile, err := os.CreateTemp("", "test")
@@ -345,18 +343,25 @@ write_files:
 	}
 
 	cfg := Config{
+		fetchTimeout: 180,
 		paths: paths{
+			aaConfig:     "",
+			agentConfig:  tmpAgentConfigFile.Name(),
+			authJson:     tmpAuthJsonFile.Name(),
 			daemonConfig: tmpDaemonConfigFile.Name(),
 			cdhConfig:    tmpCDHConfigFile.Name(),
-			authJson:     tmpAuthJsonFile.Name(),
 		},
+		checksumPath: "",
+		initdataMeta: "",
+		parentPath:   "",
+		staticFiles:  nil,
 	}
 	if err := processCloudConfig(&cfg, cc); err != nil {
 		t.Fatalf("failed to process cloud config file: %v", err)
 	}
 
 	// check if files have been written correctly
-	data, _ := os.ReadFile(tmpDaemonConfigFile.Name())
+	data, _ := os.ReadFile(tmpAgentConfigFile.Name())
 	fileContent := string(data)
 	if fileContent != testAgentConfig {
 		t.Fatalf("file content does not match daemon config fixture: got %q", fileContent)
@@ -385,9 +390,7 @@ func TestProcessWithOptionalEntries(t *testing.T) {
 	tmpAgentConfigFile, _ := os.CreateTemp("", "test")
 	defer os.Remove(tmpAgentConfigFile.Name())
 	tmpDaemonConfigFile, _ := os.CreateTemp("", "test")
-	newTmpDaemonConfigFile := tmpDaemonConfigFile.Name() + "-" + DaemonJsonName
-	_ = os.Rename(tmpDaemonConfigFile.Name(), newTmpDaemonConfigFile)
-	defer os.Remove(newTmpDaemonConfigFile)
+	defer os.Remove(tmpDaemonConfigFile.Name())
 	tmpAuthJsonFile, _ := os.CreateTemp("", "test")
 	defer os.Remove(tmpAuthJsonFile.Name())
 	tmpCDHConfigFile, _ := os.CreateTemp("", "test")
@@ -402,6 +405,8 @@ write_files:
   content: |
 %s
 `,
+		tmpAgentConfigFile.Name(),
+		indentTextBlock(testAgentConfig, 4),
 		tmpDaemonConfigFile.Name(),
 		indentTextBlock(testDaemonConfig, 4))
 	provider := TestProvider{content: content}
@@ -412,11 +417,18 @@ write_files:
 	}
 
 	cfg := Config{
+		fetchTimeout: 180,
 		paths: paths{
+			aaConfig:     "",
+			agentConfig:  tmpAgentConfigFile.Name(),
+			authJson:     tmpAuthJsonFile.Name(),
 			daemonConfig: tmpDaemonConfigFile.Name(),
 			cdhConfig:    tmpCDHConfigFile.Name(),
-			authJson:     tmpAuthJsonFile.Name(),
 		},
+		checksumPath: "",
+		initdataMeta: "",
+		parentPath:   "",
+		staticFiles:  nil,
 	}
 	if err := processCloudConfig(&cfg, cc); err != nil {
 		t.Fatalf("failed to process cloud config file: %v", err)
@@ -450,19 +462,47 @@ func TestFailPlainTextUserData(t *testing.T) {
 
 }
 
-func TestParseDaemonConfig(t *testing.T) {
-	// Get the config from the test data
-	config, err := parseDaemonConfig([]byte(testDaemonConfig))
+func TestCalculateUserDataHash(t *testing.T) {
+	tmpInitdataMeta, _ := os.CreateTemp("", "test")
+	defer os.Remove(tmpInitdataMeta.Name())
+	tmpAA, _ := os.CreateTemp("", "test")
+	defer os.Remove(tmpAA.Name())
+	tmpCDH, _ := os.CreateTemp("", "test")
+	defer os.Remove(tmpCDH.Name())
+	tmpPolicy, _ := os.CreateTemp("", "test")
+	defer os.Remove(tmpPolicy.Name())
+	tmpCheckSum, _ := os.CreateTemp("", "test")
+	defer os.Remove(tmpCheckSum.Name())
+
+	var staticFiles = []string{tmpAA.Name(), tmpCDH.Name(), tmpPolicy.Name()}
+	_ = writeFile(tmpInitdataMeta.Name(), []byte(testInitdataMeta))
+	_ = writeFile(tmpAA.Name(), []byte(testAAConfig))
+	_ = writeFile(tmpCDH.Name(), []byte(testCDHConfig))
+	_ = writeFile(tmpPolicy.Name(), []byte(testPolicyConfig))
+
+	cfg := Config{
+		fetchTimeout: 180,
+		paths: paths{
+			aaConfig:     tmpAA.Name(),
+			agentConfig:  "",
+			authJson:     "",
+			daemonConfig: "",
+			cdhConfig:    tmpCDH.Name(),
+		},
+		checksumPath: tmpCheckSum.Name(),
+		initdataMeta: tmpInitdataMeta.Name(),
+		parentPath:   "",
+		staticFiles:  staticFiles,
+	}
+
+	err := calculateUserDataHash(&cfg)
 	if err != nil {
-		t.Fatalf("parseDaemonConfig failed: %v", err)
+		t.Fatalf("calculateUserDataHash returned err: %v", err)
 	}
 
-	// Verify that the config fields match the test data
-	if config.PodNamespace != "default" {
-		t.Fatalf("config.PodNamespace does not match test data: expected %q, got %q", "default", config.PodNamespace)
-	}
-
-	if config.PodName != "nginx-866fdb5bfb-b98nw" {
-		t.Fatalf("config.PodName does not match test data: expected %q, got %q", "nginx-866fdb5bfb-b98nw", config.PodName)
+	bytes, _ := os.ReadFile(tmpCheckSum.Name())
+	sum := string(bytes)
+	if testCheckSum != sum {
+		t.Fatalf("calculateUserDataHash returned: %s does not match %s", sum, testCheckSum)
 	}
 }

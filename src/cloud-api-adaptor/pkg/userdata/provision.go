@@ -29,7 +29,7 @@ const (
 	DaemonCfgPath = "/run/peerpod/daemon.json"
 
 	InitdataMeta = "/run/peerpod/initdata.meta"
-	CheckSumPath = "/run/peerpod/checksum.txt"
+	DigestPath   = "/run/peerpod/initdata.digest"
 )
 
 var logger = log.New(log.Writer(), "[userdata/provision] ", log.LstdFlags|log.Lmsgprefix)
@@ -47,7 +47,7 @@ type paths struct {
 type Config struct {
 	fetchTimeout int
 	paths        paths
-	checksumPath string
+	digestPath   string
 	initdataMeta string
 	parentPath   string
 	staticFiles  []string
@@ -66,7 +66,7 @@ func NewConfig(fetchTimeout int) *Config {
 		paths:        ps,
 		parentPath:   ConfigParent,
 		initdataMeta: InitdataMeta,
-		checksumPath: CheckSumPath,
+		digestPath:   DigestPath,
 		staticFiles:  StaticFiles,
 	}
 }
@@ -297,9 +297,9 @@ func calculateUserDataHash(cfg *Config) error {
 		return fmt.Errorf("Error creating initdata hash, the algorothom %s not supported", initdata.Algorithom)
 	}
 
-	err = os.WriteFile(cfg.checksumPath, []byte(checksumStr), 0644) // the hash in CheckSumPath will also be used by attester
+	err = os.WriteFile(cfg.digestPath, []byte(checksumStr), 0644) // the hash in digestPath will also be used by attester
 	if err != nil {
-		return fmt.Errorf("failed to write file %s: %w", cfg.checksumPath, err)
+		return fmt.Errorf("failed to write file %s: %w", cfg.digestPath, err)
 	}
 
 	return nil

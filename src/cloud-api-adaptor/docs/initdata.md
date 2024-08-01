@@ -85,7 +85,7 @@ spec:
 ``` 
 
 ## Structure in `write_files`
-cloud-api-adaptor will read the annotation and write it to [write_files](../../cloud-providers/util/cloudinit/cloudconfig.go) via [process-user-data](../cmd/process-user-data/main.go) or cloud-init. Network tunnel config `daemon.json` will also be added in, like:
+cloud-api-adaptor will read the annotation and write it to [write_files](../../cloud-providers/util/cloudinit/cloudconfig.go) via [process-user-data](../cmd/process-user-data/main.go) or cloud-init. Note: files unrelated to initdata (like network tunnel configuration in `/run/peerpod/daemon.json`) are also part of the `write_files` directive.
 ```yaml
 write_files:
 - path: /run/peerpod/daemon.json

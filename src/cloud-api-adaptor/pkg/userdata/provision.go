@@ -86,9 +86,9 @@ type CloudConfig struct {
 }
 
 type InitData struct {
-	Algorithm  string            `toml:"algorithm"`
-	Version    string            `toml:"version"`
-	Data       map[string]string `toml:"data,omitempty"`
+	Algorithm string            `toml:"algorithm"`
+	Version   string            `toml:"version"`
+	Data      map[string]string `toml:"data,omitempty"`
 }
 
 type UserDataProvider interface {

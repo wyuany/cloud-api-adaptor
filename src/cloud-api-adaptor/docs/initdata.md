@@ -1,6 +1,6 @@
 # Initdata
 
-The document describes the approach detail of [initdata](https://github.com/confidential-containers/trustee/blob/main/kbs/docs/initdata.md) in PeerPod.
+The document describes the implementation of the [initdata](https://github.com/confidential-containers/trustee/blob/main/kbs/docs/initdata.md) spec in PeerPods.
 
 ## Initdata example
 
@@ -92,6 +92,8 @@ write_files:
   content: 
 - path: /run/peerpod/aa.toml
   content:
+- path: /run/peerpod/auth.json
+  content:
 - path: /run/peerpod/cdh.toml
   content:
 - path: /run/peerpod/policy.rego
@@ -99,7 +101,7 @@ write_files:
 ```
 
 ## Provision initdata files.
-`/run/peerpod/daemon.json`, `/run/peerpod/aa.toml`, `/run/peerpod/cdh.toml` and `/run/peerpod/policy.rego` will be provisioned.
+`/run/peerpod/daemon.json`, `/run/peerpod/aa.toml`, `/run/peerpod/auth.json`, `/run/peerpod/cdh.toml` and `/run/peerpod/policy.rego` will be provisioned.
 
 It also generates a meta file like `/run/peerpod/initdata.meta`:
 ```toml
@@ -110,3 +112,6 @@ version = "0.1.0"
 Then it calculates the digest `/run/peerpod/initdata.digest` based on the `algorithm` in `/run/peerpod/initdata.meta` and the contents of static files `/run/peerpod/aa.toml`, `/run/peerpod/cdh.toml` and `/run/peerpod/policy.rego`. While `/run/peerpod/daemon.json` will be skipped when calculating the digest because it's dynamical for each instance. 
 
 `/run/peerpod/initdata.digest` could be used by the TEE drivers. 
+
+## TODO
+A large policy bodies that cannot be provisioned via IMDS user-data, the limitation depends on providers IMDS limitation. We need add checking and limitations according to test result future. 

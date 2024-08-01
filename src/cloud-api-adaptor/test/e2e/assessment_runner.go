@@ -243,11 +243,11 @@ func (tc *TestCase) Run() {
 				}
 				_, err = clientSet.CoreV1().Secrets(E2eNamespace).Get(ctx, DEFAULT_AUTH_SECRET, metav1.GetOptions{})
 				if err == nil {
-					log.Infof("Deleting pre-existing %v...", DEFAULT_AUTH_SECRET)
+					t.Logf("Deleting pre-existing %v...", DEFAULT_AUTH_SECRET)
 					if err = clientSet.CoreV1().Secrets(E2eNamespace).Delete(ctx, DEFAULT_AUTH_SECRET, metav1.DeleteOptions{}); err != nil {
 						t.Fatal(err)
 					}
-					log.Infof("Creating empty %v...", DEFAULT_AUTH_SECRET)
+					t.Logf("Creating empty %v...", DEFAULT_AUTH_SECRET)
 					if err = client.Resources().Create(ctx, &v1.Secret{ObjectMeta: metav1.ObjectMeta{Name: DEFAULT_AUTH_SECRET, Namespace: E2eNamespace}, Type: v1.SecretTypeOpaque}); err != nil {
 						t.Fatal(err)
 					}
@@ -276,15 +276,15 @@ func (tc *TestCase) Run() {
 						t.Logf("Expected Pod State: %v", tc.podState)
 						yamlData, err := yaml.Marshal(pod.Status)
 						if err != nil {
-							fmt.Println("Error marshaling pod.Status to YAML: ", err.Error())
+							t.Logf("Error marshaling pod.Status to YAML: %v", err.Error())
 						} else {
 							t.Logf("Current Pod State: %v", string(yamlData))
 						}
 						if pod.Status.Phase == v1.PodRunning {
-							fmt.Printf("Log of the pod %.v \n===================\n", pod.Name)
+							t.Logf("Log of the pod %.v \n===================\n", pod.Name)
 							podLogString, _ := GetPodLog(ctx, client, *pod)
-							fmt.Println(podLogString)
-							fmt.Printf("===================\n")
+							t.Log(podLogString)
+							t.Logf("===================\n")
 						}
 						t.Fatal(err)
 					}
@@ -295,11 +295,11 @@ func (tc *TestCase) Run() {
 					t.Fatal(err)
 				}
 				clusterIP := WaitForClusterIP(t, client, tc.service)
-				log.Printf("webserver service is available on cluster IP: %s", clusterIP)
+				t.Logf("webserver service is available on cluster IP: %s", clusterIP)
 			}
 			if tc.extraPods != nil {
 				for _, extraPod := range tc.extraPods {
-					fmt.Printf("Provision extra pod %s", extraPod.pod.Name)
+					t.Logf("Provision extra pod %s", extraPod.pod.Name)
 					err := ProvisionPod(ctx, client, t, extraPod.pod, extraPod.podState, extraPod.testCommands)
 					if err != nil {
 						t.Fatal(err)
@@ -329,7 +329,7 @@ func (tc *TestCase) Run() {
 				}
 				if podLogString != "" {
 					if strings.Contains(podLogString, tc.expectedPodLogString) {
-						log.Printf("Output Log from Pod: %s", podLogString)
+						t.Logf("Output Log from Pod: %s", podLogString)
 					} else {
 						t.Errorf("Job Created pod with Invalid log")
 					}
@@ -413,7 +413,7 @@ func (tc *TestCase) Run() {
 					if len(tc.testCommands) > 0 {
 						if len(tc.testCommands) > 0 {
 							logString, err := AssessPodTestCommands(ctx, client, tc.pod, tc.testCommands)
-							t.Logf("Output when execute test commands:%s", logString)
+							t.Logf("Output when execute test commands: %s", logString)
 							if err != nil {
 								t.Fatal(err)
 							}
@@ -435,7 +435,7 @@ func (tc *TestCase) Run() {
 							t.Fatal(error)
 						}
 					} else if profile != "" {
-						fmt.Printf("PodVM Created with Instance Type %v", profile)
+						t.Logf("PodVM Created with Instance Type %v", profile)
 						if tc.FailReason != "" {
 							var podlist v1.PodList
 							var podLogString string
@@ -449,9 +449,9 @@ func (tc *TestCase) Run() {
 								}
 							}
 							if strings.Contains(podLogString, tc.FailReason) {
-								log.Infof("failed due to expected reason %s", tc.FailReason)
+								t.Logf("failed due to expected reason %s", tc.FailReason)
 							} else {
-								log.Infof("cloud-api-adaptor pod logs: %s", podLogString)
+								t.Logf("cloud-api-adaptor pod logs: %s", podLogString)
 								yamlData, err := yaml.Marshal(tc.pod.Status)
 								if err != nil {
 									log.Errorf("Error marshaling pod.Status to JSON: %s", err.Error())
@@ -461,7 +461,7 @@ func (tc *TestCase) Run() {
 								t.Fatal("failed due to unknown reason")
 							}
 						} else {
-							log.Infof("Pod Failed If you want to cross check please give .WithFailReason(error string)")
+							t.Logf("Pod Failed If you want to cross check please give .WithFailReason(error string)")
 						}
 					}
 				}
@@ -542,14 +542,14 @@ func (tc *TestCase) Run() {
 					t.Fatal(err)
 				}
 
-				log.Infof("Deleting Configmap... %s", tc.configMap.Name)
+				t.Logf("Deleting Configmap... %s", tc.configMap.Name)
 			}
 
 			if tc.secret != nil {
 				if err = client.Resources().Delete(ctx, tc.secret); err != nil {
 					t.Fatal(err)
 				} else {
-					log.Infof("Deleting Secret... %s", tc.secret.Name)
+					t.Logf("Deleting Secret... %s", tc.secret.Name)
 				}
 			}
 
@@ -568,7 +568,7 @@ func (tc *TestCase) Run() {
 					if err = client.Resources().Delete(ctx, extraSecret); err != nil {
 						t.Fatal(err)
 					} else {
-						log.Infof("Deleting extra Secret... %s", extraSecret.Name)
+						t.Logf("Deleting extra Secret... %s", extraSecret.Name)
 					}
 				}
 
@@ -582,14 +582,14 @@ func (tc *TestCase) Run() {
 				if err = client.Resources().Delete(ctx, tc.job); err != nil {
 					t.Fatal(err)
 				} else {
-					log.Infof("Deleting Job... %s", tc.job.Name)
+					t.Logf("Deleting Job... %s", tc.job.Name)
 				}
 				for _, pod := range podlist.Items {
 					if pod.ObjectMeta.Labels["job-name"] == tc.job.Name {
 						if err = client.Resources().Delete(ctx, &pod); err != nil {
 							t.Fatal(err)
 						}
-						log.Infof("Deleting pods created by job... %s", pod.ObjectMeta.Name)
+						t.Logf("Deleting pods created by job... %s", pod.ObjectMeta.Name)
 
 					}
 				}
@@ -599,14 +599,14 @@ func (tc *TestCase) Run() {
 				if err = client.Resources().Delete(ctx, tc.pod); err != nil {
 					t.Fatal(err)
 				}
-				log.Infof("Deleting pod %s...", tc.pod.Name)
+				t.Logf("Deleting pod %s...", tc.pod.Name)
 				if err = wait.For(conditions.New(
 					client.Resources()).ResourceDeleted(tc.pod),
 					wait.WithInterval(5*time.Second),
 					wait.WithTimeout(tc.deletionWithin)); err != nil {
 					t.Fatal(err)
 				}
-				log.Infof("Pod %s has been successfully deleted within %.0fs", tc.pod.Name, tc.deletionWithin.Seconds())
+				t.Logf("Pod %s has been successfully deleted within %.0fs", tc.pod.Name, tc.deletionWithin.Seconds())
 			}
 
 			if tc.extraPods != nil {
@@ -623,7 +623,7 @@ func (tc *TestCase) Run() {
 				if err = client.Resources().Delete(ctx, tc.pvc); err != nil {
 					t.Fatal(err)
 				} else {
-					log.Infof("Deleting PVC... %s", tc.pvc.Name)
+					t.Logf("Deleting PVC... %s", tc.pvc.Name)
 				}
 			}
 
@@ -631,7 +631,7 @@ func (tc *TestCase) Run() {
 				if err = client.Resources().Delete(ctx, tc.service); err != nil {
 					t.Fatal(err)
 				} else {
-					log.Infof("Deleting Service... %s", tc.service.Name)
+					t.Logf("Deleting Service... %s", tc.service.Name)
 				}
 			}
 

@@ -86,7 +86,7 @@ type CloudConfig struct {
 }
 
 type InitData struct {
-	Algorithom string            `toml:"algorithm"`
+	Algorithm  string            `toml:"algorithm"`
 	Version    string            `toml:"version"`
 	Data       map[string]string `toml:"data,omitempty"`
 }
@@ -283,7 +283,7 @@ func calculateUserDataHash(cfg *Config) error {
 		}
 	}
 
-	switch initdata.Algorithom {
+	switch initdata.Algorithm {
 	case "sha256":
 		hash := sha256.Sum256(byteData)
 		checksumStr = hex.EncodeToString(hash[:])
@@ -294,7 +294,7 @@ func calculateUserDataHash(cfg *Config) error {
 		hash := sha512.Sum512(byteData)
 		checksumStr = hex.EncodeToString(hash[:])
 	default:
-		return fmt.Errorf("Error creating initdata hash, the algorothom %s not supported", initdata.Algorithom)
+		return fmt.Errorf("Error creating initdata hash, the Algorithm %s not supported", initdata.Algorithm)
 	}
 
 	err = os.WriteFile(cfg.digestPath, []byte(checksumStr), 0644) // the hash in digestPath will also be used by attester
@@ -312,7 +312,7 @@ func ProvisionFiles(cfg *Config) error {
 	defer cancel()
 
 	// some providers provision config files via process-user-data
-	// some providers rely on cloud-init provisin config files
+	// some providers rely on cloud-init provision config files
 	// all providers need calculate the hash value for attesters usage
 	provider, _ := newProvider(ctx)
 	if provider != nil {

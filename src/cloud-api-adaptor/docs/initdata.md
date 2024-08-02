@@ -111,7 +111,55 @@ version = "0.1.0"
 
 Then it calculates the digest `/run/peerpod/initdata.digest` based on the `algorithm` in `/run/peerpod/initdata.meta` and the contents of static files `/run/peerpod/aa.toml`, `/run/peerpod/cdh.toml` and `/run/peerpod/policy.rego`. While `/run/peerpod/daemon.json` will be skipped when calculating the digest because it's dynamical for each instance. 
 
-`/run/peerpod/initdata.digest` could be used by the TEE drivers. 
+`/run/peerpod/initdata.digest` could be used by the TEE drivers.
+
+The digest can be calculated manually and set to attestation service policy before hand if needed. To calculate the digest, append all the contents in `aa.toml`, `cdh.toml` and `policy.rego` with newline separated and ended, take example as below:
+```
+[token_configs]
+[token_configs.coco_as]
+url = 'http://127.0.0.1:8080'
+
+[token_configs.kbs]
+url = 'http://127.0.0.1:8080'
+socket = 'unix:///run/confidential-containers/cdh.sock'
+credentials = []
+
+[kbc]
+name = 'cc_kbc'
+url = 'http://1.2.3.4:8080'
+package agent_policy
+
+import future.keywords.in
+import future.keywords.every
+
+import input
+
+# Default values, returned by OPA when rules cannot be evaluated to true.
+default CopyFileRequest := false
+default CreateContainerRequest := false
+default CreateSandboxRequest := true
+default DestroySandboxRequest := true
+default ExecProcessRequest := false
+default GetOOMEventRequest := true
+default GuestDetailsRequest := true
+default OnlineCPUMemRequest := true
+default PullImageRequest := true
+default ReadStreamRequest := false
+default RemoveContainerRequest := true
+default RemoveStaleVirtiofsShareMountsRequest := true
+default SignalProcessRequest := true
+default StartContainerRequest := true
+default StatsContainerRequest := true
+default TtyWinResizeRequest := true
+default UpdateEphemeralMountsRequest := true
+default UpdateInterfaceRequest := true
+default UpdateRoutesRequest := true
+default WaitProcessRequest := true
+default WriteStreamRequest := false
+
+```
+
+Then calculate the hash value via some online tool, the calculated sha384 is: `4c3d78dfa7f2e9da1b0b16b845f3520ee6ca0e76dc33dbb8944e609076932d56b4c6ad2deda0bffc7887959fabfdd71d` for above sample.
 
 ## TODO
 A large policy bodies that cannot be provisioned via IMDS user-data, the limitation depends on providers IMDS limitation. We need add checking and limitations according to test result future. 

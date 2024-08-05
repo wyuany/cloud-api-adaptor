@@ -5,7 +5,6 @@ package cloud
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,7 +32,6 @@ import (
 	provider "github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers"
 	putil "github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers/util"
 	"github.com/confidential-containers/cloud-api-adaptor/src/cloud-providers/util/cloudinit"
-	toml "github.com/pelletier/go-toml/v2"
 )
 
 const (
@@ -302,30 +300,9 @@ func (s *cloudService) CreateVM(ctx context.Context, req *pb.CreateVMRequest) (r
 	initdataStr := util.GetInitdataFromAnnotation(req.Annotations)
 	logger.Printf("initdata: %s", initdataStr)
 	if initdataStr != "" {
-		decodedBytes, err := base64.StdEncoding.DecodeString(initdataStr)
-		if err != nil {
-			return nil, fmt.Errorf("Error base64 decode initdata: %w", err)
-		}
-		initdata := userdata.InitData{}
-		err = toml.Unmarshal(decodedBytes, &initdata)
-		if err != nil {
-			return nil, fmt.Errorf("Error unmarshalling initdata: %w", err)
-		}
-		for key, value := range initdata.Data {
-			cloudConfig.WriteFiles = append(cloudConfig.WriteFiles, cloudinit.WriteFile{
-				Path:    filepath.Join(userdata.ConfigParent, key),
-				Content: value,
-			})
-		}
-		cloned := initdata
-		cloned.Data = nil
-		clonedToml, err := toml.Marshal(cloned) // Data field omitted
-		if err != nil {
-			return nil, fmt.Errorf("Error Marshal cloned initdata: %w", err)
-		}
 		cloudConfig.WriteFiles = append(cloudConfig.WriteFiles, cloudinit.WriteFile{
-			Path:    userdata.InitdataMeta,
-			Content: string(clonedToml),
+			Path:    userdata.InitdataPath,
+			Content: initdataStr,
 		})
 	} else if s.aaKBCParams != "" { // Keep AA_KBC_PARAMS support as it is used by e2e test, KBS is dynamic k8s service in e2e test
 		logger.Printf("aaKBCParams: %s, support cc_kbc::*", s.aaKBCParams)

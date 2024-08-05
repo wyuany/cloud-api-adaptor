@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/sha512"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -21,59 +22,30 @@ import (
 
 const (
 	ConfigParent = "/run/peerpod"
-
-	AaCfgPath     = "/run/peerpod/aa.toml"
-	AgentCfgPath  = "/run/peerpod/agent-config.toml"
-	AuthJsonPath  = "/run/peerpod/auth.json"
-	CdhCfgPath    = "/run/peerpod/cdh.toml"
-	DaemonCfgPath = "/run/peerpod/daemon.json"
-
-	InitdataMeta = "/run/peerpod/initdata.meta"
 	DigestPath   = "/run/peerpod/initdata.digest"
+	InitdataPath = "/run/peerpod/initdata"
 )
 
 var logger = log.New(log.Writer(), "[userdata/provision] ", log.LstdFlags|log.Lmsgprefix)
 
 var StaticFiles = []string{"/run/peerpod/aa.toml", "/run/peerpod/cdh.toml", "/run/peerpod/policy.rego"}
 
-type paths struct {
-	aaConfig     string
-	agentConfig  string
-	authJson     string
-	cdhConfig    string
-	daemonConfig string
-}
-
 type Config struct {
 	fetchTimeout int
-	paths        paths
 	digestPath   string
-	initdataMeta string
+	initdataPath string
 	parentPath   string
 	staticFiles  []string
 }
 
 func NewConfig(fetchTimeout int) *Config {
-	ps := paths{
-		aaConfig:     AaCfgPath,
-		agentConfig:  AgentCfgPath,
-		authJson:     AuthJsonPath,
-		cdhConfig:    CdhCfgPath,
-		daemonConfig: DaemonCfgPath,
-	}
 	return &Config{
 		fetchTimeout: fetchTimeout,
-		paths:        ps,
 		parentPath:   ConfigParent,
-		initdataMeta: InitdataMeta,
+		initdataPath: InitdataPath,
 		digestPath:   DigestPath,
 		staticFiles:  StaticFiles,
 	}
-}
-
-type entry struct {
-	path     string
-	optional bool
 }
 
 type WriteFile struct {
@@ -187,16 +159,6 @@ func parseUserData(userData []byte) (*CloudConfig, error) {
 	return &cc, nil
 }
 
-func findConfigEntry(path string, cc *CloudConfig) []byte {
-	for _, wf := range cc.WriteFiles {
-		if wf.Path != path {
-			continue
-		}
-		return []byte(wf.Content)
-	}
-	return nil
-}
-
 func writeFile(path string, bytes []byte) error {
 	// Ensure the parent directory exists
 	err := os.MkdirAll(filepath.Dir(path), 0755)
@@ -212,44 +174,11 @@ func writeFile(path string, bytes []byte) error {
 	return nil
 }
 
-func isPredefinedConfigEntry(path string, entries []entry) bool {
-	for _, e := range entries {
-		if e.path == path {
-			return true
-		}
-	}
-	return false
-}
-
 func processCloudConfig(cfg *Config, cc *CloudConfig) error {
-	entries := []entry{
-		{path: cfg.paths.agentConfig, optional: false},
-		{path: cfg.paths.daemonConfig, optional: false},
-		{path: cfg.paths.aaConfig, optional: true},
-		{path: cfg.paths.cdhConfig, optional: true},
-		{path: cfg.paths.authJson, optional: true},
-	}
-
-	// entries pre-defined
-	for _, e := range entries {
-		bytes := findConfigEntry(e.path, cc)
-		if bytes == nil {
-			if !e.optional {
-				return fmt.Errorf("failed to find %s entry in cloud config", e.path)
-			}
-			continue
-		}
-		err := writeFile(e.path, bytes)
-		if err != nil {
-			return err
-		}
-	}
-
-	// entries not pre-defined by caa, we have some special config for some specific providers, handle it here...
 	for _, wf := range cc.WriteFiles {
 		path := wf.Path
 		bytes := []byte(wf.Content)
-		if bytes != nil && !isPredefinedConfigEntry(path, entries) {
+		if bytes != nil {
 			if err := writeFile(path, bytes); err != nil {
 				return fmt.Errorf("failed to write config file %s: %w", path, err)
 			}
@@ -259,45 +188,49 @@ func processCloudConfig(cfg *Config, cc *CloudConfig) error {
 	return nil
 }
 
-func calculateUserDataHash(cfg *Config) error {
-	initToml, err := os.ReadFile(cfg.initdataMeta)
-	if err != nil {
-		return err
-	}
-	var initdata InitData
-	err = toml.Unmarshal(initToml, &initdata)
-	if err != nil {
-		return err
+func extractInitdataAndHash(cfg *Config) error {
+	if _, err := os.Stat(cfg.initdataPath); err != nil {
+		return fmt.Errorf("Error stat initdata file: %w", err)
 	}
 
-	checksumStr := ""
-	var byteData []byte
-	for _, file := range cfg.staticFiles {
-		if _, err := os.Stat(file); err == nil {
-			logger.Printf("calculateUserDataHash and reading file %s\n", file)
-			bytes, err := os.ReadFile(file)
-			if err != nil {
-				return fmt.Errorf("Error reading file %s: %v", file, err)
-			}
-			byteData = append(byteData, bytes...)
+	dataBytes, err := os.ReadFile(cfg.initdataPath)
+	if err != nil {
+		return fmt.Errorf("Error read initdata file: %w", err)
+	}
+
+	decodedBytes, err := base64.StdEncoding.DecodeString(string(dataBytes))
+	if err != nil {
+		return fmt.Errorf("Error base64 decode initdata: %w", err)
+	}
+	initdata := InitData{}
+	err = toml.Unmarshal(decodedBytes, &initdata)
+	if err != nil {
+		return fmt.Errorf("Error unmarshalling initdata: %w", err)
+	}
+
+	for key, value := range initdata.Data {
+		err := writeFile(filepath.Join(cfg.parentPath, key), []byte(value))
+		if err != nil {
+			return fmt.Errorf("Error write a file in initdata: %w", err)
 		}
 	}
 
+	checksumStr := ""
 	switch initdata.Algorithm {
 	case "sha256":
-		hash := sha256.Sum256(byteData)
+		hash := sha256.Sum256(dataBytes)
 		checksumStr = hex.EncodeToString(hash[:])
 	case "sha384":
-		hash := sha512.Sum384(byteData)
+		hash := sha512.Sum384(dataBytes)
 		checksumStr = hex.EncodeToString(hash[:])
 	case "sha512":
-		hash := sha512.Sum512(byteData)
+		hash := sha512.Sum512(dataBytes)
 		checksumStr = hex.EncodeToString(hash[:])
 	default:
 		return fmt.Errorf("Error creating initdata hash, the Algorithm %s not supported", initdata.Algorithm)
 	}
 
-	err = os.WriteFile(cfg.digestPath, []byte(checksumStr), 0644) // the hash in digestPath will also be used by attester
+	err = writeFile(cfg.digestPath, []byte(checksumStr)) // the hash in digestPath will also be used by attester
 	if err != nil {
 		return fmt.Errorf("failed to write file %s: %w", cfg.digestPath, err)
 	}
@@ -328,8 +261,8 @@ func ProvisionFiles(cfg *Config) error {
 		logger.Printf("unsupported user data provider, we calculate initdata hash only.\n")
 	}
 
-	if err := calculateUserDataHash(cfg); err != nil {
-		return fmt.Errorf("failed to calculate initdata hash: %w", err)
+	if err := extractInitdataAndHash(cfg); err != nil {
+		return fmt.Errorf("failed to extract initdata hash: %w", err)
 	}
 
 	return nil

@@ -85,81 +85,27 @@ spec:
 ``` 
 
 ## Structure in `write_files`
-cloud-api-adaptor will read the annotation and write it to [write_files](../../cloud-providers/util/cloudinit/cloudconfig.go) via [process-user-data](../cmd/process-user-data/main.go) or cloud-init. Note: files unrelated to initdata (like network tunnel configuration in `/run/peerpod/daemon.json`) are also part of the `write_files` directive.
+cloud-api-adaptor will read the annotation and write it to [write_files](../../cloud-providers/util/cloudinit/cloudconfig.go). Note: files unrelated to initdata (like network tunnel configuration in `/run/peerpod/daemon.json`) are also part of the `write_files` directive.
 ```yaml
 write_files:
+- path: /run/peerpod/agent-config.toml
+  content: 
 - path: /run/peerpod/daemon.json
   content: 
-- path: /run/peerpod/aa.toml
-  content:
 - path: /run/peerpod/auth.json
   content:
-- path: /run/peerpod/cdh.toml
-  content:
-- path: /run/peerpod/policy.rego
+- path: /run/peerpod/initdata
   content:
 ```
 
 ## Provision initdata files.
-`/run/peerpod/daemon.json`, `/run/peerpod/aa.toml`, `/run/peerpod/auth.json`, `/run/peerpod/cdh.toml` and `/run/peerpod/policy.rego` will be provisioned.
+`/run/peerpod/aa.toml`, `/run/peerpod/cdh.toml` and `/run/peerpod/policy.rego` will be provisioned from `/run/peerpod/initdata` via [process-user-data](../cmd/process-user-data/main.go).
 
-It also generates a meta file like `/run/peerpod/initdata.meta`:
-```toml
-algorithm = "sha384"
-version = "0.1.0"
-```
-
-Then it calculates the digest `/run/peerpod/initdata.digest` based on the `algorithm` in `/run/peerpod/initdata.meta` and the contents of static files `/run/peerpod/aa.toml`, `/run/peerpod/cdh.toml` and `/run/peerpod/policy.rego`. While `/run/peerpod/daemon.json` will be skipped when calculating the digest because it's dynamical for each instance. 
+It also calculates the digest `/run/peerpod/initdata.digest` based on the `algorithm` in `/run/peerpod/initdata` and its contents.
 
 `/run/peerpod/initdata.digest` could be used by the TEE drivers.
 
-The digest can be calculated manually and set to attestation service policy before hand if needed. To calculate the digest, append all the contents in `aa.toml`, `cdh.toml` and `policy.rego` with newline separated and ended, take example as below:
-```
-[token_configs]
-[token_configs.coco_as]
-url = 'http://127.0.0.1:8080'
-
-[token_configs.kbs]
-url = 'http://127.0.0.1:8080'
-socket = 'unix:///run/confidential-containers/cdh.sock'
-credentials = []
-
-[kbc]
-name = 'cc_kbc'
-url = 'http://1.2.3.4:8080'
-package agent_policy
-
-import future.keywords.in
-import future.keywords.every
-
-import input
-
-# Default values, returned by OPA when rules cannot be evaluated to true.
-default CopyFileRequest := false
-default CreateContainerRequest := false
-default CreateSandboxRequest := true
-default DestroySandboxRequest := true
-default ExecProcessRequest := false
-default GetOOMEventRequest := true
-default GuestDetailsRequest := true
-default OnlineCPUMemRequest := true
-default PullImageRequest := true
-default ReadStreamRequest := false
-default RemoveContainerRequest := true
-default RemoveStaleVirtiofsShareMountsRequest := true
-default SignalProcessRequest := true
-default StartContainerRequest := true
-default StatsContainerRequest := true
-default TtyWinResizeRequest := true
-default UpdateEphemeralMountsRequest := true
-default UpdateInterfaceRequest := true
-default UpdateRoutesRequest := true
-default WaitProcessRequest := true
-default WriteStreamRequest := false
-
-```
-
-Then calculate the hash value via some online tool, the calculated sha384 is: `4c3d78dfa7f2e9da1b0b16b845f3520ee6ca0e76dc33dbb8944e609076932d56b4c6ad2deda0bffc7887959fabfdd71d` for above sample.
+The digest can be calculated manually and set to attestation service policy before hand if needed. To calculate the digest, use a tool (for example some online sha tools) to calculate the hash value based on the initdata annotation string. The calculated sha384 is: `14980c75860de9adcba2e0e494fc612f0f4fe3d86f5dc8e238a3255acfdf43bf82b9ccfc21da95d639ff0c98cc15e05e` for above sample.
 
 ## TODO
 A large policy bodies that cannot be provisioned via IMDS user-data, the limitation depends on providers IMDS limitation. We need add checking and limitations according to test result future. 
